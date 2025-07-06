@@ -291,10 +291,14 @@ class Quadruped_RL_Collection_Node(Node):
                 # Saving to file trajectory
                 desired_fps = 50
                 data = {
+                    "joints_list": ["FL_hip_joint", "FL_thigh_joint", "FL_calf_joint", 
+                                        "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint", 
+                                        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint", 
+                                        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"],
                     "actual_joints_position": self.saved_actual_joints_position,
                     "actual_joints_velocity": self.saved_actual_joints_velocity,
-                    "desired_joint_position": self.saved_desired_joints_position,
-                    "desired_joint_velocity": self.saved_desired_joints_velocity,
+                    "desired_joints_position": self.saved_desired_joints_position,
+                    "desired_joints_velocity": self.saved_desired_joints_velocity,
                     "fps": desired_fps,
                 }
                 # Save the data to an .npy file

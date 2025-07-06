@@ -114,7 +114,7 @@ class Console():
                         time.sleep(0.01)
 
                     
-                elif(input_string == "startGeneration"):
+                elif(input_string == "startCollection"):
                     self.isActivated = not self.isActivated
 
 
