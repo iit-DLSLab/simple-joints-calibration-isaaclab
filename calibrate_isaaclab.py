@@ -51,7 +51,6 @@ import gymnasium as gym
 import os
 import torch
 
-from amp_rsl_rl.runners import AMPOnPolicyRunner
 import numpy as np
 import time
 
@@ -62,8 +61,6 @@ from isaaclab_rl.rsl_rl import (
     RslRlVecEnvWrapper,
 )
 
-from isaaclab.utils.dict import print_dict
-from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.assets import Articulation
 
 # Import extensions to set up environment tasks
@@ -72,7 +69,6 @@ import quadruped_rl_collection.tasks  # noqa: F401
 import utility
 
 def main():
-    """Play with RSL-RL agent."""
     # parse configuration
     env_cfg = parse_env_cfg(
         args_cli.task,
@@ -82,11 +78,11 @@ def main():
     )
 
 
-
     # create isaac environment
     env = gym.make(
         args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None
     )
+
 
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env)
@@ -195,7 +191,7 @@ def main():
                 # Compute error between desired and actual joint positions
                 error_joint_pos[env_ids] += torch.abs(joint_pos - obs["joint_positions"])
                 error_joint_vel[env_ids] += torch.abs(joint_vel - obs["joint_velocities"])
-                # Print the errors for debugging
+                
 
 
 
@@ -208,12 +204,13 @@ def main():
 
     # Print the average errors
     avg_error = error_joint_pos.mean(dim=0) + error_joint_vel.mean(dim=0)
-    print("Average Joint Position Error:", avg_error.cpu().numpy())
-    print("Average Joint Velocity Error:", avg_error.cpu().numpy())
+    print("Average Joint Error:", avg_error.cpu().numpy())
 
     # take the best Kp and Kd values
     best_kp = kp_values[avg_error.argmin()]
     best_kd = kd_values[avg_error.argmin()]
+
+    print(f"Best Kp: {best_kp.item()}, Best Kd: {best_kd.item()}")
 
     # close the simulator
     env.close()
