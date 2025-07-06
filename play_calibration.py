@@ -1,0 +1,394 @@
+# Description: This script is used to run the policy on the real robot
+
+# Authors:
+# Giulio Turrisi
+
+import rclpy 
+from rclpy.node import Node 
+from sensor_msgs.msg import Joy
+from dls2_msgs.msg import BaseStateMsg, BlindStateMsg, ControlSignalMsg, TrajectoryGeneratorMsg
+
+import time
+import numpy as np
+np.set_printoptions(precision=3, suppress=True)
+
+import threading
+
+import copy
+
+# Gym and Simulation related imports
+import mujoco
+from gym_quadruped.quadruped_env import QuadrupedEnv
+from gym_quadruped.utils.quadruped_utils import LegsAttr
+
+import sys
+import os 
+dir_path = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(dir_path+"/../")
+
+
+# Set the priority of the process
+pid = os.getpid()
+print("PID: ", pid)
+os.system("renice -n -21 -p " + str(pid))
+os.system("echo -20 > /proc/" + str(pid) + "/autogroup")
+#for real time, launch it with chrt -r 99 python3 run_controller.py
+
+USE_MUJOCO_RENDER = True
+USE_MUJOCO_SIMULATION = True
+
+USE_FIXED_LOOP_TIME = False
+USE_SATURATED_LOOP_TIME = False
+
+USE_SCHEDULER = True # This enable a call to the run function every tot seconds by using a ros2 timer
+RL_FREQ = 50 # this is only valid if USE_SCHEDULER is True
+
+USE_SMOOTH_VELOCITY = True
+
+class Quadruped_RL_Collection_Node(Node):
+    def __init__(self):
+        super().__init__('Basic_Locomotion_DLS_IsaacLab_Node')
+        # Subscribers and Publishers
+        self.subscription_base_state = self.create_subscription(BaseStateMsg,"/dls2/base_state", self.get_base_state_callback, 1)
+        self.subscription_blind_state = self.create_subscription(BlindStateMsg,"/dls2/blind_state", self.get_blind_state_callback, 1)
+        self.publisher_trajectory_generator = self.create_publisher(TrajectoryGeneratorMsg,"dls2/trajectory_generator", 1)
+        if(USE_SCHEDULER):
+            self.timer = self.create_timer(1.0/RL_FREQ, self.compute_rl_control)
+
+
+        # Safety check to not do anything until a first base and blind state are received
+        self.first_message_base_arrived = False
+        self.first_message_joints_arrived = False 
+
+        # Timing stuff
+        self.loop_time = 0.002
+        self.last_start_time = None
+
+        # Base State
+        self.position = np.zeros(3)
+        self.orientation = np.zeros(4)
+        self.linear_velocity = np.zeros(3)
+        self.angular_velocity = np.zeros(3)
+
+        # Blind State
+        self.joint_positions = np.array([0.0, 1.21, -2.794, 0.0, 1.21, -2.794, 0.0, 1.21, -2.794, 0.0, 1.21, -2.794])
+        self.joint_velocities = np.zeros(12)
+        self.feet_contact = np.zeros(4)
+
+        # Mujoco env
+        robot_name = "aliengo"
+        scene_name = "flat" #random-boxes
+        simulation_dt = 0.002
+
+
+        # Create the quadruped robot environment -----------------------------------------------------------
+        self.env = QuadrupedEnv(
+            robot=robot_name,
+            scene=scene_name,
+            sim_dt=simulation_dt,
+            base_vel_command_type="human",  # "forward", "random", "forward+rotate", "human"
+        )
+        self.env.reset(random=False)
+
+
+        
+        self.last_render_time = time.time()
+        if USE_MUJOCO_RENDER:
+            self.env.render()
+
+        
+
+        self.stand_up_and_down_actions = LegsAttr(*[np.zeros((1, int(self.env.mjModel.nu/4))) for _ in range(4)])
+        self.stand_up_and_down_actions.FL = np.array([0.,   1.201, -2.791])
+        self.stand_up_and_down_actions.FR = np.array([0.,   1.201, -2.791])
+        self.stand_up_and_down_actions.RL = np.array([0.,   1.201, -2.791])
+        self.stand_up_and_down_actions.RR = np.array([0.,   1.201, -2.791])
+        self.Kp_stand_up_and_down = 25.
+        self.Kd_stand_up_and_down = 2.
+
+        self.calibration_reference_joint_positions = None
+        self.saved_actual_joints_position = None
+        self.saved_actual_joints_velocity = None
+        self.saved_desired_joints_position = None
+        self.saved_desired_joints_velocity = None
+        self.num_traj_saved = 0
+
+
+        # Interactive Command Line ----------------------------
+        from console import Console
+        self.console = Console(controller_node=self)
+        thread_console = threading.Thread(target=self.console.interactive_command_line)
+        thread_console.daemon = True
+        thread_console.start()
+
+
+
+    def get_base_state_callback(self, msg):
+        
+        self.position = np.array(msg.position)
+        # For the quaternion, the order is [w, x, y, z] on mujoco, and [x, y, z, w] on DLS2
+        self.orientation = np.roll(np.array(msg.orientation), 1)
+        self.linear_velocity = np.array(msg.linear_velocity)
+        # For the angular velocity, mujoco is in the base frame, and DLS2 is in the world frame
+        self.angular_velocity = np.array(msg.angular_velocity) 
+
+        self.first_message_base_arrived = True
+
+
+
+    def get_blind_state_callback(self, msg):
+        
+        self.joint_positions = np.array(msg.joints_position)
+        self.joint_velocities = np.array(msg.joints_velocity)
+        self.feet_contact = np.array(msg.feet_contact)
+
+        # Fix convention DLS2
+        self.joint_positions[0] = -self.joint_positions[0]
+        self.joint_positions[6] = -self.joint_positions[6]
+        self.joint_velocities[0] = -self.joint_velocities[0]
+        self.joint_velocities[6] = -self.joint_velocities[6]
+
+        self.first_message_joints_arrived = True
+
+        if(not USE_SCHEDULER):
+            if(self.last_start_time is not None):
+                start_time = time.perf_counter()
+                if(start_time - self.last_start_time > 1./RL_FREQ):
+                    self.compute_rl_control()
+            else:
+                self.compute_rl_control()
+        
+
+
+    def compute_rl_control(self):
+        # Update the loop time
+        if(USE_FIXED_LOOP_TIME):
+            simulation_dt = 1./RL_FREQ
+            start_time = time.perf_counter()
+            if(self.last_start_time is not None):
+                self.loop_time = (start_time - self.last_start_time)
+            self.last_start_time = start_time
+        elif(USE_SATURATED_LOOP_TIME):
+            start_time = time.perf_counter()
+            if(self.last_start_time is not None):
+                self.loop_time = (start_time - self.last_start_time)
+            self.last_start_time = start_time
+            simulation_dt = self.loop_time
+            if(simulation_dt > 1./(RL_FREQ-10)):
+                simulation_dt = 0.025
+        else:
+            start_time = time.perf_counter()
+            if(self.last_start_time is not None):
+                self.loop_time = (start_time - self.last_start_time)
+            self.last_start_time = start_time
+            simulation_dt = self.loop_time
+
+        # Safety check to not do anything until a first base and blind state are received
+        if(not USE_MUJOCO_SIMULATION and self.first_message_base_arrived==False and self.first_message_joints_arrived==False):
+            return
+
+        old_base_lin_vel = self.env.base_lin_vel(frame='base')
+
+        # Update the mujoco model
+        if(not USE_MUJOCO_SIMULATION):
+            self.env.mjData.qpos[0:3] = copy.deepcopy(self.position)
+            self.env.mjData.qpos[3:7] = copy.deepcopy(self.orientation)
+            self.env.mjData.qvel[0:3] = copy.deepcopy(self.linear_velocity)
+            self.env.mjData.qvel[3:6] = copy.deepcopy(self.angular_velocity)
+            self.env.mjData.qpos[7:] = copy.deepcopy(self.joint_positions)
+            self.env.mjData.qvel[6:] = copy.deepcopy(self.joint_velocities)
+            self.env.mjModel.opt.timestep = simulation_dt
+            mujoco.mj_forward(self.env.mjModel, self.env.mjData)  
+        else:
+            self.env.mjData.qpos[0:3] = np.array([0, 0, 0.4])
+            self.env.mjData.qvel[0:3] = np.array([0, 0, 0.])
+            self.env.mjData.qvel[3:6] = np.array([0, 0, 0.0])
+
+
+        env = self.env
+        
+        qpos, qvel = env.mjData.qpos, env.mjData.qvel
+        base_lin_vel = env.base_lin_vel(frame='base')
+
+
+        if(USE_SMOOTH_VELOCITY):
+            base_lin_vel = 0.5*base_lin_vel + 0.5*old_base_lin_vel
+
+        joints_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+        joints_pos.FL = qpos[env.legs_qpos_idx.FL]
+        joints_pos.FR = qpos[env.legs_qpos_idx.FR]
+        joints_pos.RL = qpos[env.legs_qpos_idx.RL]
+        joints_pos.RR = qpos[env.legs_qpos_idx.RR]
+    
+        joints_vel = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+        joints_vel.FL = qvel[env.legs_qvel_idx.FL]
+        joints_vel.FR = qvel[env.legs_qvel_idx.FR]
+        joints_vel.RL = qvel[env.legs_qvel_idx.RL]
+        joints_vel.RR = qvel[env.legs_qvel_idx.RR]
+    
+
+        if(self.console.isDown):
+            desired_joint_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+            desired_joint_pos.FL = self.stand_up_and_down_actions.FL
+            desired_joint_pos.FR = self.stand_up_and_down_actions.FR
+            desired_joint_pos.RL = self.stand_up_and_down_actions.RL
+            desired_joint_pos.RR = self.stand_up_and_down_actions.RR
+
+            # Impedence Loop
+            Kp = self.Kp_stand_up_and_down
+            Kd = self.Kd_stand_up_and_down
+            
+
+        elif(self.console.isActivated):
+
+            if self.calibration_reference_joint_positions is None:
+                print("Generating first a setpoint..")
+                hip_setpoint = np.random.uniform(-0.2, 0.5)
+                thigh_setpoint = np.random.uniform(-1.0, 0.5)
+                calf_setpoint = np.random.uniform(-0., 1.5)
+                self.calibration_reference_joint_positions = LegsAttr(*[np.zeros((1, int(self.env.mjModel.nu/4))) for _ in range(4)])
+                self.calibration_reference_joint_positions.FL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+                self.calibration_reference_joint_positions.FR = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+                self.calibration_reference_joint_positions.RL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+                self.calibration_reference_joint_positions.RR = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+
+
+            desired_joint_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+            
+            desired_joint_pos.FL = copy.deepcopy(self.calibration_reference_joint_positions.FL)
+            desired_joint_pos.FR = copy.deepcopy(self.calibration_reference_joint_positions.FR)
+            desired_joint_pos.RL = copy.deepcopy(self.calibration_reference_joint_positions.RL)
+            desired_joint_pos.RR = copy.deepcopy(self.calibration_reference_joint_positions.RR) 
+
+
+            concatenated_actual_joints_position = np.concatenate([joints_pos.FL, joints_pos.FR,
+                                                                joints_pos.RL, joints_pos.RR])
+            concatenated_actual_joints_velocity = np.concatenate([joints_vel.FL, joints_vel.FR,
+                                                                joints_vel.RL, joints_vel.RR])
+            concatenated_desired_joints_position = np.concatenate([desired_joint_pos.FL, desired_joint_pos.FR,
+                                                                desired_joint_pos.RL, desired_joint_pos.RR])
+            concatenated_desired_joints_velocity = np.concatenate([joints_vel.FL*0.0, joints_vel.FR*0.0,
+                                                                joints_vel.RL*0.0, joints_vel.RR*0.0])
+
+            if self.saved_actual_joints_position is None:
+                self.saved_actual_joints_position = concatenated_actual_joints_position
+                self.saved_actual_joints_velocity = concatenated_actual_joints_velocity
+                self.saved_desired_joints_position = concatenated_desired_joints_position
+                self.saved_desired_joints_velocity = concatenated_desired_joints_velocity
+            else:
+                self.saved_actual_joints_position  = np.vstack([self.saved_actual_joints_position, concatenated_actual_joints_position])
+                self.saved_actual_joints_velocity = np.vstack([self.saved_actual_joints_velocity, concatenated_actual_joints_velocity])
+                self.saved_desired_joints_position  = np.vstack([self.saved_desired_joints_position, concatenated_desired_joints_position])
+                self.saved_desired_joints_velocity = np.vstack([self.saved_desired_joints_velocity, concatenated_desired_joints_velocity])
+
+            if(np.linalg.norm(desired_joint_pos.FL - joints_pos.FL) < 0.1
+               and np.linalg.norm(desired_joint_pos.FR - joints_pos.FR) < 0.1
+               and np.linalg.norm(desired_joint_pos.RL - joints_pos.RL) < 0.1
+               and np.linalg.norm(desired_joint_pos.RR - joints_pos.RR) < 0.1):
+                self.calibration_reference_joint_positions = None
+                
+
+                # Saving to file trajectory
+                desired_fps = 50
+                data = {
+                    "actual_joints_position": self.saved_actual_joints_position,
+                    "actual_joints_velocity": self.saved_actual_joints_velocity,
+                    "desired_joint_position": self.saved_desired_joints_position,
+                    "desired_joint_velocity": self.saved_desired_joints_velocity,
+                    "fps": desired_fps,
+                }
+                # Save the data to an .npy file
+                output_file = f"datasets/traj_{self.num_traj_saved}.npy"
+                np.save(output_file, data)
+
+                self.num_traj_saved += 1
+                self.saved_actual_joints_position = None
+                self.saved_actual_joints_velocity = None
+                self.saved_desired_joints_position = None
+                self.saved_desired_joints_velocity = None
+
+
+            # Impedence Loop
+            Kp = self.Kp_stand_up_and_down
+            Kd = self.Kd_stand_up_and_down
+      
+
+
+        else:
+            return
+
+
+        
+        if USE_MUJOCO_SIMULATION:
+            for j in range(10): #Hardcoded for now, if RL is 50Hz, this runs the simulation at 500Hz
+                joints_pos.FL = qpos[env.legs_qpos_idx.FL]
+                joints_pos.FR = qpos[env.legs_qpos_idx.FR]
+                joints_pos.RL = qpos[env.legs_qpos_idx.RL]
+                joints_pos.RR = qpos[env.legs_qpos_idx.RR]
+            
+                joints_vel.FL = qvel[env.legs_qvel_idx.FL]
+                joints_vel.FR = qvel[env.legs_qvel_idx.FR]
+                joints_vel.RL = qvel[env.legs_qvel_idx.RL]
+                joints_vel.RR = qvel[env.legs_qvel_idx.RR]
+
+                error_joints_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+                error_joints_pos.FL = np.clip(desired_joint_pos.FL - joints_pos.FL, -1.5, 1.5)
+                error_joints_pos.FR = np.clip(desired_joint_pos.FR - joints_pos.FR, -1.5, 1.5)
+                error_joints_pos.RL = np.clip(desired_joint_pos.RL - joints_pos.RL, -1.5, 1.5)
+                error_joints_pos.RR = np.clip(desired_joint_pos.RR - joints_pos.RR, -1.5, 1.5)
+                
+                tau = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+                tau.FL = Kp * (error_joints_pos.FL) - Kd * joints_vel.FL
+                tau.FR = Kp * (error_joints_pos.FR) - Kd * joints_vel.FR
+                tau.RL = Kp * (error_joints_pos.RL) - Kd * joints_vel.RL
+                tau.RR = Kp * (error_joints_pos.RR) - Kd * joints_vel.RR
+
+
+                action = np.zeros(self.env.mjModel.nu)
+                action[self.env.legs_tau_idx.FL] = tau.FL.reshape((3,))
+                action[self.env.legs_tau_idx.FR] = tau.FR.reshape((3,))
+                action[self.env.legs_tau_idx.RL] = tau.RL.reshape((3,))
+                action[self.env.legs_tau_idx.RR] = tau.RR.reshape((3,))
+                self.env.step(action=action)
+
+        
+
+        # Fix convention DLS2 and send PD target
+        desired_joint_pos.FL[0] = -desired_joint_pos.FL[0]
+        desired_joint_pos.RL[0] = -desired_joint_pos.RL[0] 
+
+        trajectory_generator_msg = TrajectoryGeneratorMsg()
+        trajectory_generator_msg.joints_position = np.concatenate([desired_joint_pos.FL, desired_joint_pos.FR, desired_joint_pos.RL, desired_joint_pos.RR], axis=0).flatten()
+        
+        desired_joint_vel = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+        trajectory_generator_msg.joints_velocity = np.concatenate([desired_joint_vel.FL, desired_joint_vel.FR, desired_joint_vel.RL, desired_joint_vel.RR], axis=0).flatten()
+
+        #trajectory_generator_msg.kp = np.ones(12)*Kp
+        #trajectory_generator_msg.kd = np.ones(12)*Kd
+        self.publisher_trajectory_generator.publish(trajectory_generator_msg)
+        
+        
+        
+        # Render the simulation -----------------------------------------------------------------------------------
+        if USE_MUJOCO_RENDER:
+            RENDER_FREQ = 30
+            # Render only at a certain frequency -----------------------------------------------------------------
+            if time.time() - self.last_render_time > 1.0 / RENDER_FREQ or self.env.step_num == 1:
+                self.env.render()
+                self.last_render_time = time.time()
+
+
+
+
+#---------------------------
+if __name__ == '__main__':
+    print('Hello from quadruped_rl_collection.')
+    rclpy.init()
+    quadruped_rl_collection_node = Quadruped_RL_Collection_Node()
+
+    rclpy.spin(quadruped_rl_collection_node)
+    quadruped_rl_collection_node.destroy_node()
+    rclpy.shutdown()
+
+    print("Quadruped-RL-Collection node is stopped")
+    exit(0)

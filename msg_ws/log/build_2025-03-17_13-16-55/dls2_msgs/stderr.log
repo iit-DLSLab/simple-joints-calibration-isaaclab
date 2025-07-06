@@ -1,0 +1,42 @@
+[31mCMake Error at /home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/share/rosidl_adapter/cmake/rosidl_adapt_interfaces.cmake:59 (message):
+  
+  execute_process(/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/bin/python3.10
+  -m rosidl_adapter --package-name dls2_msgs --arguments-file
+  /home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter__arguments__dls2_msgs.json
+  --output-dir
+  /home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs
+  --output-file
+  /home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs.idls)
+  returned error code 1:
+
+  Error processing 'float64[12] kp;' of 'dls2_msgs/TrajectoryGeneratorMsg':
+  ''kp;' is an invalid field name.  It should have the pattern
+  '^(?!.*__)(?!.*_$)[a-z][a-z0-9_]*$''
+
+  Traceback (most recent call last):
+
+    File "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+      return _run_code(code, main_globals, None,
+    File "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/python3.10/runpy.py", line 86, in _run_code
+      exec(code, run_globals)
+    File "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/python3.10/site-packages/rosidl_adapter/__main__.py", line 19, in <module>
+      sys.exit(main())
+    File "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/python3.10/site-packages/rosidl_adapter/main.py", line 53, in main
+      abs_idl_file = convert_to_idl(
+    File "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/python3.10/site-packages/rosidl_adapter/__init__.py", line 19, in convert_to_idl
+      return convert_msg_to_idl(
+    File "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/python3.10/site-packages/rosidl_adapter/msg/__init__.py", line 28, in convert_msg_to_idl
+      msg = parse_message_string(package_name, input_file.stem, content)
+    File "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/python3.10/site-packages/rosidl_adapter/parser.py", line 519, in parse_message_string
+      fields.append(Field(
+    File "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/python3.10/site-packages/rosidl_adapter/parser.py", line 354, in __init__
+      raise NameError(
+
+  NameError: 'kp;' is an invalid field name.  It should have the pattern
+  '^(?!.*__)(?!.*_$)[a-z][a-z0-9_]*$'
+
+Call Stack (most recent call first):
+  /home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/share/rosidl_cmake/cmake/rosidl_generate_interfaces.cmake:130 (rosidl_adapt_interfaces)
+  CMakeLists.txt:28 (rosidl_generate_interfaces)
+
+[0m

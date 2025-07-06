@@ -1,0 +1,4 @@
+source;share/dls2_msgs/local_setup.bash
+source;share/dls2_msgs/local_setup.dsv
+source;share/dls2_msgs/local_setup.sh
+source;share/dls2_msgs/local_setup.zsh

@@ -1,0 +1,23 @@
+{
+  "package_name": "dls2_msgs",
+  "output_dir": "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_typesupport_cpp/dls2_msgs",
+  "template_dir": "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/share/rosidl_typesupport_cpp/resource",
+  "idl_tuples": [
+    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs:msg/BlindStateMsg.idl",
+    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs:msg/BaseStateMsg.idl",
+    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs:msg/ControlSignalMsg.idl",
+    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs:msg/TrajectoryGeneratorMsg.idl"
+  ],
+  "target_dependencies": [
+    "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/rosidl_typesupport_cpp/rosidl_typesupport_cpp",
+    "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/lib/python3.10/site-packages/rosidl_typesupport_cpp/__init__.py",
+    "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/share/rosidl_typesupport_cpp/resource/action__type_support.cpp.em",
+    "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/share/rosidl_typesupport_cpp/resource/idl__type_support.cpp.em",
+    "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/share/rosidl_typesupport_cpp/resource/msg__type_support.cpp.em",
+    "/home/iit.local/gturrisi/mambaforge/envs/isaaclab_env/share/rosidl_typesupport_cpp/resource/srv__type_support.cpp.em",
+    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs/msg/BlindStateMsg.idl",
+    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs/msg/BaseStateMsg.idl",
+    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs/msg/ControlSignalMsg.idl",
+    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs/msg/TrajectoryGeneratorMsg.idl"
+  ]
+}
