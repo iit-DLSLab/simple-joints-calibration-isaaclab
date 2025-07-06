@@ -201,6 +201,7 @@ class Quadruped_RL_Collection_Node(Node):
             mujoco.mj_forward(self.env.mjModel, self.env.mjData)  
         else:
             self.env.mjData.qpos[0:3] = np.array([0, 0, 0.4])
+            self.env.mjData.qpos[3:7] = np.array([1, 0, 0, 0])
             self.env.mjData.qvel[0:3] = np.array([0, 0, 0.])
             self.env.mjData.qvel[3:6] = np.array([0, 0, 0.0])
 
@@ -281,6 +282,11 @@ class Quadruped_RL_Collection_Node(Node):
                 self.saved_desired_joints_position  = np.vstack([self.saved_desired_joints_position, concatenated_desired_joints_position])
                 self.saved_desired_joints_velocity = np.vstack([self.saved_desired_joints_velocity, concatenated_desired_joints_velocity])
 
+            """print("error FL: ", np.linalg.norm(desired_joint_pos.FL - joints_pos.FL))
+            print("error FR: ", np.linalg.norm(desired_joint_pos.FR - joints_pos.FR))
+            print("error RL: ", np.linalg.norm(desired_joint_pos.RL - joints_pos.RL))
+            print("error RR: ", np.linalg.norm(desired_joint_pos.RR - joints_pos.RR))"""
+
             if(np.linalg.norm(desired_joint_pos.FL - joints_pos.FL) < 0.1
                and np.linalg.norm(desired_joint_pos.FR - joints_pos.FR) < 0.1
                and np.linalg.norm(desired_joint_pos.RL - joints_pos.RL) < 0.1
@@ -310,6 +316,8 @@ class Quadruped_RL_Collection_Node(Node):
                 self.saved_actual_joints_velocity = None
                 self.saved_desired_joints_position = None
                 self.saved_desired_joints_velocity = None
+
+                time.sleep(2.0)
 
 
             # Impedence Loop
