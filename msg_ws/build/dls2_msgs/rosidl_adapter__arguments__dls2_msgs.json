@@ -1,9 +1,0 @@
-{
-  "package_name": "dls2_msgs",
-  "non_idl_tuples": [
-    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/src/dls2_msgs:msg/BlindStateMsg.msg",
-    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/src/dls2_msgs:msg/BaseStateMsg.msg",
-    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/src/dls2_msgs:msg/ControlSignalMsg.msg",
-    "/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/src/dls2_msgs:msg/TrajectoryGeneratorMsg.msg"
-  ]
-}

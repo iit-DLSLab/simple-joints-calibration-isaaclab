@@ -1,4 +1,0 @@
-/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs:msg/BlindStateMsg.idl
-/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs:msg/BaseStateMsg.idl
-/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs:msg/ControlSignalMsg.idl
-/home/iit.local/gturrisi/isaaclab_ws_home/quadruped_rl_collection/scripts/sim_to_others/ros2/msg_ws/build/dls2_msgs/rosidl_adapter/dls2_msgs:msg/TrajectoryGeneratorMsg.idl
