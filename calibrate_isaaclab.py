@@ -66,6 +66,7 @@ from isaaclab.assets import Articulation
 import basic_locomotion_dls_isaaclab.tasks  # noqa: F401
 
 import utility
+import config
 from isaaclab.managers import SceneEntityCfg
 
 
@@ -109,22 +110,25 @@ def main():
         [0, 0, 0, 0, 0, 0], dtype=torch.float32, device=env.device
     ).repeat(args_cli.num_envs,1)
     
-    # space the base positions over a 50m x 50m square grid
+    # space the base positions over a 20m x 20m square grid
     grid_size = int(torch.ceil(torch.sqrt(torch.tensor(args_cli.num_envs, dtype=torch.float32))))
-    spacing = 50.0 / (grid_size - 1) if grid_size > 1 else 0.0
+    spacing = 20.0 / (grid_size - 1) if grid_size > 1 else 0.0
     
     for i in range(args_cli.num_envs):
         row = i // grid_size
         col = i % grid_size
-        freezed_base_positions[i, 0] += col * spacing - 25.0  # Center around origin (-25 to +25)
-        freezed_base_positions[i, 1] += row * spacing - 25.0  # Center around origin (-25 to +25)
+        freezed_base_positions[i, 0] += col * spacing - 10.0  # Center around origin (-10 to +10)
+        freezed_base_positions[i, 1] += row * spacing - 10.0  # Center around origin (-10 to +10)
     freezed_base_orientations = torch.tensor(
         [0, 0, 0, 1], dtype=torch.float32, device=env.device
     ).repeat(args_cli.num_envs,1)
 
     # Sample different Kp and Kd values for each environment
-    kp_values = 20. + (torch.rand((args_cli.num_envs, 4), device=env.device) - 0.5) * 10.0  # Random Kp
-    kd_values = 2.5 + (torch.rand((args_cli.num_envs, 4), device=env.device) - 0.5) * 4.  # Random Kd
+    nominal_kp = config.Kp_walking
+    nominal_kd = config.Kd_walking
+    # Randomize ±50% around nominal values
+    kp_values = nominal_kp * (1.0 + (torch.rand((args_cli.num_envs, 4), device=env.device) - 0.5))  # ±50% of nominal Kp
+    kd_values = nominal_kd * (1.0 + (torch.rand((args_cli.num_envs, 4), device=env.device) - 0.5))  # ±50% of nominal Kd
 
     # Sample different friction static and dynamic values for each environment
     friction_static_values = (torch.rand((args_cli.num_envs, 4), device=env.device)) * 2.0  # Random static friction
