@@ -5,7 +5,6 @@
 import argparse
 
 from isaaclab.app import AppLauncher
-
 # local imports
 import cli_args  # isort: skip
 
@@ -64,9 +63,11 @@ from isaaclab_rl.rsl_rl import (
 from isaaclab.assets import Articulation
 
 # Import extensions to set up environment tasks
-import quadruped_rl_collection.tasks  # noqa: F401
+import basic_locomotion_dls_isaaclab.tasks  # noqa: F401
 
 import utility
+from isaaclab.managers import SceneEntityCfg
+
 
 def main():
     # parse configuration
@@ -100,30 +101,41 @@ def main():
     all_dataset_desired_joint_vel = datasets["all_dataset_desired_joint_vel"]
     dataset_fps = datasets["dataset_fps"]
 
-    base_positions = torch.tensor(
-        [0, 0, 0.4], dtype=torch.float32, device=env.device
+
+    freezed_base_positions = torch.tensor(
+        [0, 0, 0.8], dtype=torch.float32, device=env.device
     ).repeat(args_cli.num_envs,1)
-    # space the base positions with a fixed offset for each environment
-    base_positions[:, 0] += torch.arange(
-        args_cli.num_envs, dtype=torch.float32, device=env.device
-    ) * 0.5  # Adjust the offset as needed
-    base_positions[:, 1] += torch.arange(
-        args_cli.num_envs, dtype=torch.float32, device=env.device
-    ) * 0.5  # Adjust the offset as needed
-    base_orientations = torch.tensor(
+    freezed_base_velocities = torch.tensor(
+        [0, 0, 0, 0, 0, 0], dtype=torch.float32, device=env.device
+    ).repeat(args_cli.num_envs,1)
+    
+    # space the base positions over a 50m x 50m square grid
+    grid_size = int(torch.ceil(torch.sqrt(torch.tensor(args_cli.num_envs, dtype=torch.float32))))
+    spacing = 50.0 / (grid_size - 1) if grid_size > 1 else 0.0
+    
+    for i in range(args_cli.num_envs):
+        row = i // grid_size
+        col = i % grid_size
+        freezed_base_positions[i, 0] += col * spacing - 25.0  # Center around origin (-25 to +25)
+        freezed_base_positions[i, 1] += row * spacing - 25.0  # Center around origin (-25 to +25)
+    freezed_base_orientations = torch.tensor(
         [0, 0, 0, 1], dtype=torch.float32, device=env.device
     ).repeat(args_cli.num_envs,1)
 
     # Sample different Kp and Kd values for each environment
-    kp_values = 20. + (torch.rand(args_cli.num_envs, device=env.device) - 0.5) * 10.0  # Random Kp
-    kd_values = 2.5 + (torch.rand(args_cli.num_envs, device=env.device) - 0.5) * 4.  # Random Kd
+    kp_values = 20. + (torch.rand((args_cli.num_envs, 4), device=env.device) - 0.5) * 10.0  # Random Kp
+    kd_values = 2.5 + (torch.rand((args_cli.num_envs, 4), device=env.device) - 0.5) * 4.  # Random Kd
+
+    # Sample different friction static and dynamic values for each environment
+    friction_static_values = (torch.rand((args_cli.num_envs, 4), device=env.device)) * 2.0  # Random static friction
+    friction_dynamic_values = (torch.rand((args_cli.num_envs, 4), device=env.device)) * 2.0  # Random dynamic friction
 
     # Apply the Kp and Kd values to the robot's joints
-    asset_cfg.name = "bo?"
-    asset: Articulation = env.scene[asset_cfg.name]
+    asset_cfg = SceneEntityCfg("robot", joint_names=[".*"])
+    asset: Articulation = env.unwrapped.scene[asset_cfg.name]
     for actuator in asset.actuators.values():
-        actuator.stiffness[env_ids] = kp_values
-        actuator.damping[env_ids] = kd_values
+        actuator.stiffness[:] = kp_values
+        actuator.damping[:] = kd_values
 
     error_joint_pos = torch.zeros(
         (args_cli.num_envs, len(env.unwrapped._robot.joint_names)), dtype=torch.float32, device=env.device 
@@ -131,13 +143,15 @@ def main():
     error_joint_vel = torch.zeros(
         (args_cli.num_envs, len(env.unwrapped._robot.joint_names)), dtype=torch.float32, device=env.device
     )
-
+    
     # simulate environment
     while simulation_app.is_running():
         # run everything in inference mode
         with torch.inference_mode():
-
-            if( timestep >= all_dataset_actual_joint_pos.shape[0] - 1):
+            
+            print(f"Running timestep: {timestep}")
+            
+            if(timestep >= all_dataset_actual_joint_pos.shape[0] - 1):
                 print("End of dataset reached, resetting to the beginning.")
                 break
             
@@ -149,7 +163,10 @@ def main():
                 print("End of motion reached, reset initial robot configuration.")
                 # reset the environment
                 env.unwrapped._robot.write_root_pose_to_sim(
-                    torch.cat([base_positions, base_orientations], dim=-1), env_ids=env_ids
+                    torch.cat([freezed_base_positions, freezed_base_orientations], dim=-1), env_ids=env_ids
+                )
+                env.unwrapped._robot.write_root_velocity_to_sim(
+                    freezed_base_velocities, env_ids=env_ids
                 )
 
                 joint_pos = torch.tensor(
@@ -177,20 +194,24 @@ def main():
                 )
 
                 env.unwrapped._robot.write_root_pose_to_sim(
-                    torch.cat([base_positions, base_orientations], dim=-1), env_ids=env_ids
+                    torch.cat([freezed_base_positions, freezed_base_orientations], dim=-1), env_ids=env_ids
+                )
+
+                env.unwrapped._robot.write_root_velocity_to_sim(
+                    freezed_base_velocities, env_ids=env_ids
                 )
                 
-                env.unwrapped._robot.write_joint_state_to_sim(
+                """env.unwrapped._robot.write_joint_state_to_sim(
                     joint_pos, joint_vel, env_ids=env_ids
-                )
+                )"""
                 
                 # control the robot with the joint positions and 
                 actions = desired_joint_pos
                 obs, _, _, _ = env.step(actions)
                 
                 # Compute error between desired and actual joint positions
-                error_joint_pos[env_ids] += torch.abs(joint_pos - obs["joint_positions"])
-                error_joint_vel[env_ids] += torch.abs(joint_vel - obs["joint_velocities"])
+                error_joint_pos[env_ids] += torch.abs(joint_pos - env.unwrapped._robot.data.joint_pos)
+                error_joint_vel[env_ids] += torch.abs(joint_vel - env.unwrapped._robot.data.joint_vel)
                 
 
 
@@ -202,15 +223,16 @@ def main():
 
             time.sleep(1.0 / dataset_fps)
 
+    
     # Print the average errors
-    avg_error = error_joint_pos.mean(dim=0) + error_joint_vel.mean(dim=0)
-    print("Average Joint Error:", avg_error.cpu().numpy())
+    avg_error = error_joint_pos.mean(dim=1) + error_joint_vel.mean(dim=1)
+    print("Average Joint Error:", avg_error)
 
     # take the best Kp and Kd values
     best_kp = kp_values[avg_error.argmin()]
     best_kd = kd_values[avg_error.argmin()]
 
-    print(f"Best Kp: {best_kp.item()}, Best Kd: {best_kd.item()}")
+    print(f"Best Kp: ", best_kp, "Best Kd: ", best_kd)
 
     # close the simulator
     env.close()
