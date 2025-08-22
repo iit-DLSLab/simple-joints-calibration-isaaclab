@@ -95,7 +95,21 @@ def main():
     env_ids = torch.arange(args_cli.num_envs, device=env.unwrapped.device)  # Updated to include all env IDs
 
 
-    datasets = utility.load_datasets()
+    expected_joint_order = [
+        "FL_hip_joint",
+        "FR_hip_joint",
+        "RL_hip_joint",
+        "RR_hip_joint",
+        "FL_thigh_joint",
+        "FR_thigh_joint",
+        "RL_thigh_joint",
+        "RR_thigh_joint",
+        "FL_calf_joint",
+        "FR_calf_joint",
+        "RL_calf_joint",
+        "RR_calf_joint",
+    ]
+    datasets = utility.load_datasets(expected_joint_order)
     all_dataset_actual_joint_pos = datasets["all_dataset_actual_joint_pos"]
     all_dataset_actual_joint_vel = datasets["all_dataset_actual_joint_vel"]
     all_dataset_desired_joint_pos = datasets["all_dataset_desired_joint_pos"]
@@ -112,13 +126,14 @@ def main():
     
     # space the base positions over a 20m x 20m square grid
     grid_size = int(torch.ceil(torch.sqrt(torch.tensor(args_cli.num_envs, dtype=torch.float32))))
-    spacing = 20.0 / (grid_size - 1) if grid_size > 1 else 0.0
+    dimension_world = 200.0 #meters
+    spacing = dimension_world / (grid_size - 1) if grid_size > 1 else 0.0
     
     for i in range(args_cli.num_envs):
         row = i // grid_size
         col = i % grid_size
-        freezed_base_positions[i, 0] += col * spacing - 10.0  # Center around origin (-10 to +10)
-        freezed_base_positions[i, 1] += row * spacing - 10.0  # Center around origin (-10 to +10)
+        freezed_base_positions[i, 0] += col * spacing - dimension_world/2.  # Center around origin 
+        freezed_base_positions[i, 1] += row * spacing - dimension_world/2.  # Center around origin 
     freezed_base_orientations = torch.tensor(
         [0, 0, 0, 1], dtype=torch.float32, device=env.device
     ).repeat(args_cli.num_envs,1)
@@ -197,7 +212,6 @@ def main():
                 )"""
                 
                 # control the robot with the desired joint positions
-                #_, _, _, _ = env.step(desired_joint_pos)
                 env.unwrapped._robot.set_joint_position_target(desired_joint_pos)
                 for _ in range(env.unwrapped.cfg.decimation):
                     env.unwrapped.scene.write_data_to_sim()
@@ -213,10 +227,13 @@ def main():
                 joint_vel = torch.tensor(
                     all_dataset_actual_joint_vel[timestep+1], dtype=torch.float32, device=env.device
                 )
-                
-                # Compute error between desired and actual joint positions
-                error_joint_pos[env_ids] += torch.abs(joint_pos - env.unwrapped._robot.data.joint_pos)
-                error_joint_vel[env_ids] += torch.abs(joint_vel - env.unwrapped._robot.data.joint_vel)
+
+                if((joint_pos == np.array([-10.0]*joint_pos.shape[0])).all()):
+                    print("##################")
+                else:
+                    # Compute error between desired and actual joint positions
+                    error_joint_pos[env_ids] += torch.abs(joint_pos - env.unwrapped._robot.data.joint_pos)
+                    error_joint_vel[env_ids] += torch.abs(joint_vel - env.unwrapped._robot.data.joint_vel)
                 
 
 

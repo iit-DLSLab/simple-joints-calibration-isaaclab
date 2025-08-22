@@ -3,7 +3,7 @@ import torch
 import os
 
 
-def load_datasets():
+def load_datasets(expected_joint_order):
     """
     Load the dataset from the specified path.
     Returns:
@@ -21,21 +21,6 @@ def load_datasets():
     print(f"Number of trajectory in '{datasets_path}': {len(files)}")
     print("Files:", files)
 
-    # This should came from outside..
-    expected_joint_names = [
-        "FL_hip_joint",
-        "FR_hip_joint",
-        "RL_hip_joint",
-        "RR_hip_joint",
-        "FL_thigh_joint",
-        "FR_thigh_joint",
-        "RL_thigh_joint",
-        "RR_thigh_joint",
-        "FL_calf_joint",
-        "FR_calf_joint",
-        "RL_calf_joint",
-        "RR_calf_joint",
-    ]
 
     all_dataset_actual_joint_pos = None
     all_dataset_actual_joint_vel = None
@@ -58,9 +43,9 @@ def load_datasets():
         timestep = 0
 
 
-        # build index map for expected_joint_names
+        # build index map for expected_joint_order
         idx_map: List[Union[int, None]] = []
-        for j in expected_joint_names:
+        for j in expected_joint_order:
             if j in dataset_joint_names:
                 idx_map.append(dataset_joint_names.index(j))
             else:
@@ -108,7 +93,7 @@ def load_datasets():
 
 
         # attach a termination frame to the end of each dataset
-        termination_frame = np.zeros((len(expected_joint_names),), dtype=dataset_actual_joint_pos.dtype) - 10.
+        termination_frame = np.zeros((len(expected_joint_order),), dtype=dataset_actual_joint_pos.dtype) - 10.
         dataset_actual_joint_pos = np.concatenate(
             (termination_frame[None, :], dataset_actual_joint_pos), axis=0)
         dataset_actual_joint_vel = np.concatenate(
