@@ -91,7 +91,6 @@ def main():
 
 
     # reset environment
-    timestep = 0
     env_ids = torch.arange(args_cli.num_envs, device=env.unwrapped.device)  # Updated to include all env IDs
 
 
@@ -117,13 +116,10 @@ def main():
     dataset_fps = datasets["dataset_fps"]
 
 
-    freezed_base_positions = torch.tensor(
-        [0, 0, 0.8], dtype=torch.float32, device=env.device
-    ).repeat(args_cli.num_envs,1)
-    freezed_base_velocities = torch.tensor(
-        [0, 0, 0, 0, 0, 0], dtype=torch.float32, device=env.device
-    ).repeat(args_cli.num_envs,1)
-    
+    freezed_base_positions = torch.tensor([0, 0, 0.8], dtype=torch.float32, device=env.device).repeat(args_cli.num_envs,1)
+    freezed_base_velocities = torch.tensor([0, 0, 0, 0, 0, 0], dtype=torch.float32, device=env.device).repeat(args_cli.num_envs,1)
+    freezed_base_orientations = torch.tensor([0, 0, 0, 1], dtype=torch.float32, device=env.device).repeat(args_cli.num_envs,1)
+
     # space the base positions over a 20m x 20m square grid
     grid_size = int(torch.ceil(torch.sqrt(torch.tensor(args_cli.num_envs, dtype=torch.float32))))
     dimension_world = 200.0 #meters
@@ -138,126 +134,213 @@ def main():
         [0, 0, 0, 1], dtype=torch.float32, device=env.device
     ).repeat(args_cli.num_envs,1)
 
-    # Sample different Kp and Kd values for each environment
-    nominal_kp = config.Kp_walking
-    nominal_kd = config.Kd_walking
-    # Randomize ±50% around nominal values
-    kp_values = nominal_kp * (1.0 + (torch.rand((args_cli.num_envs, 4), device=env.device) - 0.5))  # ±50% of nominal Kp
-    kd_values = nominal_kd * (1.0 + (torch.rand((args_cli.num_envs, 4), device=env.device) - 0.5))  # ±50% of nominal Kd
 
-    # Sample different friction static and dynamic values for each environment
-    friction_static_values = (torch.rand((args_cli.num_envs, 4), device=env.device)) * 2.0  # Random static friction
-    friction_dynamic_values = (torch.rand((args_cli.num_envs, 4), device=env.device)) * 2.0  # Random dynamic friction
 
-    # Apply the Kp and Kd values to the robot's joints
-    asset_cfg = SceneEntityCfg("robot", joint_names=[".*"])
-    asset: Articulation = env.unwrapped.scene[asset_cfg.name]
-    for actuator in asset.actuators.values():
-        actuator.stiffness[:] = kp_values
-        actuator.damping[:] = kd_values
+    def single_iteration():
+        timestep = 0
 
-    error_joint_pos = torch.zeros(
-        (args_cli.num_envs, len(env.unwrapped._robot.joint_names)), dtype=torch.float32, device=env.device 
-    )
-    error_joint_vel = torch.zeros(
-        (args_cli.num_envs, len(env.unwrapped._robot.joint_names)), dtype=torch.float32, device=env.device
-    )
-    
-    # simulate environment
-    while simulation_app.is_running():
-        # run everything in inference mode
-        with torch.inference_mode():
-            
-            print(f"Running timestep: {timestep}")
-            
-            if(timestep >= all_dataset_actual_joint_pos.shape[0] - 1):
-                print("End of dataset reached, resetting to the beginning.")
-                break
-            
-            env.unwrapped._robot.write_root_pose_to_sim(
-                    torch.cat([freezed_base_positions, freezed_base_orientations], dim=-1), env_ids=env_ids
-            )
+        # Sample different Kp and Kd values for each environment
+        nominal_kp = config.Kp_walking
+        nominal_kd = config.Kd_walking
+        # Sample in steps of 0.5 within ±50% range
+        # Calculate the range in actual values
+        kp_range = nominal_kp * 0.5  # ±50% of nominal
+        kd_range = nominal_kd * 0.5  # ±50% of nominal
 
-            env.unwrapped._robot.write_root_velocity_to_sim(
-                freezed_base_velocities, env_ids=env_ids
-            )
-            
-            joint_pos = torch.tensor(
-                all_dataset_actual_joint_pos[timestep], dtype=torch.float32, device=env.device
-            )
+        # Create steps of 0.5 within the range
+        kp_min = nominal_kp - kp_range
+        kp_max = nominal_kp + kp_range
+        kd_min = nominal_kd - kd_range  
+        kd_max = nominal_kd + kd_range
 
-            if(joint_pos == torch.tensor([-10.0] * joint_pos.shape[0], device=env.device)).all():
-                print("End of motion reached, reset initial robot configuration.")
+        # Number of 0.5 steps in each direction
+        kp_num_steps = int((kp_max - kp_min) / config.Kp_sampling_interval) + 1
+        kd_num_steps = int((kd_max - kd_min) / config.Kd_sampling_interval) + 1
+
+        # Sample random step indices
+        kp_step_indices = torch.randint(0, kp_num_steps, (args_cli.num_envs, 3), device=env.device)
+        kd_step_indices = torch.randint(0, kd_num_steps, (args_cli.num_envs, 3), device=env.device)
+
+        # Convert to actual values
+        kp_values = kp_min + kp_step_indices * config.Kp_sampling_interval
+        kd_values = kd_min + kd_step_indices * config.Kd_sampling_interval
+
+        # Apply the Kp and Kd values to the robot's joints
+        asset_cfg = SceneEntityCfg("robot", joint_names=[".*"])
+        asset: Articulation = env.unwrapped.scene[asset_cfg.name]
+        asset.actuators["hip"].stiffness = kp_values[:, 0].unsqueeze(1).repeat(1, 4)
+        asset.actuators["thigh"].stiffness = kp_values[:, 1].unsqueeze(1).repeat(1, 4)
+        asset.actuators["calf"].stiffness = kp_values[:, 2].unsqueeze(1).repeat(1, 4)
+        asset.actuators["hip"].damping = kd_values[:, 0].unsqueeze(1).repeat(1, 4)
+        asset.actuators["thigh"].damping = kd_values[:, 1].unsqueeze(1).repeat(1, 4)
+        asset.actuators["calf"].damping = kd_values[:, 2].unsqueeze(1).repeat(1, 4)
+
+
+
+        # Sample different friction static and dynamic values for each environment
+        nominal_friction_static = config.friction_static
+        nominal_friction_dynamic = config.friction_dynamic
+        # Sample in steps of 0.05 within ±50% range
+        friction_static_range = nominal_friction_static * 0.9  # ±50% of nominal
+        friction_dynamic_range = nominal_friction_dynamic * 0.9  # ±50% of nominal
+        # Create steps of 0.05 within the range
+        friction_static_min = nominal_friction_static - friction_static_range
+        friction_static_max = nominal_friction_static + friction_static_range
+        friction_dynamic_min = nominal_friction_dynamic - friction_dynamic_range
+        friction_dynamic_max = nominal_friction_dynamic + friction_dynamic_range
+        # Number of 0.05 steps in each direction
+        friction_static_num_steps = int((friction_static_max - friction_static_min) / 0.05) + 1
+        friction_dynamic_num_steps = int((friction_dynamic_max - friction_dynamic_min) / 0.05) + 1
+        # Sample random step indices
+        friction_static_step_indices = torch.randint(0, friction_static_num_steps, (args_cli.num_envs,), device=env.device)
+        friction_dynamic_step_indices = torch.randint(0, friction_dynamic_num_steps, (args_cli.num_envs,), device=env.device)
+        # Convert to actual values
+        friction_static_values = friction_static_min + friction_static_step_indices * 0.05
+        friction_dynamic_values = friction_dynamic_min + friction_dynamic_step_indices * 0.05
+        # Apply the friction values to the robot
+        hip_stiffness = asset.actuators["hip"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
+        thigh_stiffness = asset.actuators["thigh"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
+        calf_stiffness = asset.actuators["calf"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
+        hip_damping = asset.actuators["hip"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
+        thigh_damping = asset.actuators["thigh"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
+        calf_damping = asset.actuators["calf"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
+
+
+        error_joint_pos = torch.zeros(
+            (args_cli.num_envs, len(env.unwrapped._robot.joint_names)), dtype=torch.float32, device=env.device 
+        )
+        error_joint_vel = torch.zeros(
+            (args_cli.num_envs, len(env.unwrapped._robot.joint_names)), dtype=torch.float32, device=env.device
+        )
+
+        
+        # simulate environment
+        while simulation_app.is_running():
+            # run everything in inference mode
+            with torch.inference_mode():
                 
-                # Reset the robot to its initial configuration
+                print(f"Running timestep: {timestep}")
+                
+                if(timestep >= all_dataset_actual_joint_pos.shape[0] - 1):
+                    print("End of dataset reached, resetting to the beginning.")
+                    break
+                
+                env.unwrapped._robot.write_root_pose_to_sim(
+                        torch.cat([freezed_base_positions, freezed_base_orientations], dim=-1), env_ids=env_ids
+                )
+
+                env.unwrapped._robot.write_root_velocity_to_sim(
+                    freezed_base_velocities, env_ids=env_ids
+                )
+                
                 joint_pos = torch.tensor(
-                    all_dataset_actual_joint_pos[timestep+1], dtype=torch.float32, device=env.device
-                )
-                env.unwrapped._robot.write_joint_state_to_sim(
-                    joint_pos, joint_pos*0.0, env_ids=env_ids
+                    all_dataset_actual_joint_pos[timestep], dtype=torch.float32, device=env.device
                 )
 
-                env.env.render()
-                time.sleep(1.0)
-            
-            else:
-    
-                # Perform a simulation step   
-                desired_joint_pos = torch.tensor(
-                    all_dataset_desired_joint_pos[timestep], dtype=torch.float32, device=env.device
-                )
+                if(joint_pos == torch.tensor([-10.0] * joint_pos.shape[0], device=env.device)).all():
+                    print("End of motion reached, reset initial robot configuration.")
+                    
+                    # Reset the robot to its initial configuration
+                    joint_pos = torch.tensor(
+                        all_dataset_actual_joint_pos[timestep+1], dtype=torch.float32, device=env.device
+                    )
+                    env.unwrapped._robot.write_joint_state_to_sim(
+                        joint_pos, joint_pos*0.0, env_ids=env_ids
+                    )
+
+                    env.env.render()
+                    time.sleep(1.0)
                 
-                """env.unwrapped._robot.write_joint_state_to_sim(
-                    joint_pos, joint_vel, env_ids=env_ids
-                )"""
-                
-                # control the robot with the desired joint positions
-                env.unwrapped._robot.set_joint_position_target(desired_joint_pos)
-                for _ in range(env.unwrapped.cfg.decimation):
-                    env.unwrapped.scene.write_data_to_sim()
-                    # simulate
-                    env.unwrapped.sim.step(render=False)
-                    env.unwrapped.scene.update(dt=env.unwrapped.physics_dt)
-
-                # And check the errors
-                joint_pos = torch.tensor(
-                    all_dataset_actual_joint_pos[timestep+1], dtype=torch.float32, device=env.device
-                )
-
-                joint_vel = torch.tensor(
-                    all_dataset_actual_joint_vel[timestep+1], dtype=torch.float32, device=env.device
-                )
-
-                if((joint_pos == np.array([-10.0]*joint_pos.shape[0])).all()):
-                    print("##################")
                 else:
-                    # Compute error between desired and actual joint positions
-                    error_joint_pos[env_ids] += torch.abs(joint_pos - env.unwrapped._robot.data.joint_pos)
-                    error_joint_vel[env_ids] += torch.abs(joint_vel - env.unwrapped._robot.data.joint_vel)
-                
+        
+                    # Perform a simulation step   
+                    desired_joint_pos = torch.tensor(
+                        all_dataset_desired_joint_pos[timestep], dtype=torch.float32, device=env.device
+                    )
+                    
+                    """env.unwrapped._robot.write_joint_state_to_sim(
+                        joint_pos, joint_vel, env_ids=env_ids
+                    )"""
+                    
+                    # control the robot with the desired joint positions
+                    env.unwrapped._robot.set_joint_position_target(desired_joint_pos)
+                    for _ in range(env.unwrapped.cfg.decimation):
+                        env.unwrapped.scene.write_data_to_sim()
+                        # simulate
+                        env.unwrapped.sim.step(render=False)
+                        env.unwrapped.scene.update(dt=env.unwrapped.physics_dt)
+
+                    # And check the errors
+                    joint_pos = torch.tensor(
+                        all_dataset_actual_joint_pos[timestep+1], dtype=torch.float32, device=env.device
+                    )
+
+                    joint_vel = torch.tensor(
+                        all_dataset_actual_joint_vel[timestep+1], dtype=torch.float32, device=env.device
+                    )
+
+                    if(joint_pos == torch.tensor([-10.0] * joint_pos.shape[0], device=env.device)).all():
+                        print("##################")
+                    else:
+                        # Compute error between desired and actual joint positions
+                        error_joint_pos[env_ids] += torch.abs(joint_pos - env.unwrapped._robot.data.joint_pos)
+                        error_joint_vel[env_ids] += torch.abs(joint_vel - env.unwrapped._robot.data.joint_vel)
+                    
 
 
-            timestep += 1
+                timestep += 1
 
-            # env stepping
-            env.env.render()
+                # env stepping
+                env.env.render()
 
-            time.sleep(1.0 / dataset_fps)
+                time.sleep(1.0 / dataset_fps)
 
+        
+        # Print the average errors
+        avg_error = error_joint_pos.mean(dim=1) + error_joint_vel.mean(dim=1)
+        print("Average Joint Error:", avg_error)
+
+        print("Minimum Joint Error: ", avg_error.min())
+
+
+        print(f"Best Kp iteration: ", kp_values[avg_error.argmin()])
+        print(f"Best Kd iteration: ", kd_values[avg_error.argmin()])
+        print(f"Best Friction Static iteration: ", friction_static_values[avg_error.argmin()])
+        print(f"Best Friction Dynamic iteration: ", friction_dynamic_values[avg_error.argmin()])
+
+        return avg_error.min(), kp_values[avg_error.argmin()], kd_values[avg_error.argmin()], friction_static_values[avg_error.argmin()], friction_dynamic_values[avg_error.argmin()]
     
-    # Print the average errors
-    avg_error = error_joint_pos.mean(dim=1) + error_joint_vel.mean(dim=1)
-    print("Average Joint Error:", avg_error)
 
-    # take the best Kp and Kd values
-    best_kp = kp_values[avg_error.argmin()]
-    best_kd = kd_values[avg_error.argmin()]
 
-    print(f"Best Kp: ", best_kp, "Best Kd: ", best_kd)
+    num_iterations = 10
+    min_error = 1000
+    best_kp = None
+    best_kd = None
+    best_friction_static = None
+    best_friction_dynamic = None
+    for j in range(num_iterations):
+        print("Iteration: ", j)
+        error, \
+        kp, \
+        kd, \
+        friction_static, \
+        friction_dynamic = single_iteration()
+        if(error < min_error):
+            min_error = error
+            best_kp = kp
+            best_kd = kd
+            best_friction_static = friction_static
+            best_friction_dynamic = friction_dynamic
+    
+    print("min_error: ", min_error)
+    print("Best Kp: ", best_kp)
+    print("Best Kd: ", best_kd)
+    print("Best Friction Static: ", best_friction_static)
+    print("Best Friction Dynamic: ", best_friction_dynamic)
+
 
     # close the simulator
     env.close()
-
 
 if __name__ == "__main__":
     # run the main execution
