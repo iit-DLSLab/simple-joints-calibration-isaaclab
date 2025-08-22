@@ -159,20 +159,22 @@ def main():
                 print("End of dataset reached, resetting to the beginning.")
                 break
             
+            env.unwrapped._robot.write_root_pose_to_sim(
+                    torch.cat([freezed_base_positions, freezed_base_orientations], dim=-1), env_ids=env_ids
+            )
+
+            env.unwrapped._robot.write_root_velocity_to_sim(
+                freezed_base_velocities, env_ids=env_ids
+            )
+            
             joint_pos = torch.tensor(
                 all_dataset_actual_joint_pos[timestep], dtype=torch.float32, device=env.device
             )
 
             if(joint_pos == torch.tensor([-10.0] * joint_pos.shape[0], device=env.device)).all():
                 print("End of motion reached, reset initial robot configuration.")
-                # reset the environment
-                env.unwrapped._robot.write_root_pose_to_sim(
-                    torch.cat([freezed_base_positions, freezed_base_orientations], dim=-1), env_ids=env_ids
-                )
-                env.unwrapped._robot.write_root_velocity_to_sim(
-                    freezed_base_velocities, env_ids=env_ids
-                )
-
+                
+                # Reset the robot to its initial configuration
                 joint_pos = torch.tensor(
                     all_dataset_actual_joint_pos[timestep+1], dtype=torch.float32, device=env.device
                 )
@@ -181,43 +183,41 @@ def main():
                 )
 
                 env.env.render()
-                time.sleep(2.0)
+                time.sleep(1.0)
             
             else:
-                
-                joint_pos = torch.tensor(
-                    all_dataset_actual_joint_pos[timestep+1], dtype=torch.float32, device=env.device
-                )
-
-                joint_vel = torch.tensor(
-                    all_dataset_actual_joint_vel[timestep], dtype=torch.float32, device=env.device
-                )
-
+    
+                # Perform a simulation step   
                 desired_joint_pos = torch.tensor(
                     all_dataset_desired_joint_pos[timestep], dtype=torch.float32, device=env.device
-                )
-
-                env.unwrapped._robot.write_root_pose_to_sim(
-                    torch.cat([freezed_base_positions, freezed_base_orientations], dim=-1), env_ids=env_ids
-                )
-
-                env.unwrapped._robot.write_root_velocity_to_sim(
-                    freezed_base_velocities, env_ids=env_ids
                 )
                 
                 """env.unwrapped._robot.write_joint_state_to_sim(
                     joint_pos, joint_vel, env_ids=env_ids
                 )"""
                 
-                # control the robot with the joint positions and 
-                actions = desired_joint_pos
-                obs, _, _, _ = env.step(actions)
+                # control the robot with the desired joint positions
+                #_, _, _, _ = env.step(desired_joint_pos)
+                env.unwrapped._robot.set_joint_position_target(desired_joint_pos)
+                for _ in range(env.unwrapped.cfg.decimation):
+                    env.unwrapped.scene.write_data_to_sim()
+                    # simulate
+                    env.unwrapped.sim.step(render=False)
+                    env.unwrapped.scene.update(dt=env.unwrapped.physics_dt)
+
+                # And check the errors
+                joint_pos = torch.tensor(
+                    all_dataset_actual_joint_pos[timestep+1], dtype=torch.float32, device=env.device
+                )
+
+                joint_vel = torch.tensor(
+                    all_dataset_actual_joint_vel[timestep+1], dtype=torch.float32, device=env.device
+                )
                 
                 # Compute error between desired and actual joint positions
                 error_joint_pos[env_ids] += torch.abs(joint_pos - env.unwrapped._robot.data.joint_pos)
                 error_joint_vel[env_ids] += torch.abs(joint_vel - env.unwrapped._robot.data.joint_vel)
                 
-
 
 
             timestep += 1
