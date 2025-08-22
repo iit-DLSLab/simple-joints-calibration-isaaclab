@@ -36,3 +36,6 @@ else:
 
 Kp_sampling_interval = 0.5
 Kd_sampling_interval = 0.1
+
+
+datasets_path = "./datasets/aliengo/from_reality"

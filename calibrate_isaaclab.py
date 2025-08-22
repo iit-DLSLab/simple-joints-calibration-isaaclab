@@ -108,7 +108,8 @@ def main():
         "RL_calf_joint",
         "RR_calf_joint",
     ]
-    datasets = utility.load_datasets(expected_joint_order)
+    datasets_path = config.datasets_path
+    datasets = utility.load_datasets(datasets_path, expected_joint_order)
     all_dataset_actual_joint_pos = datasets["all_dataset_actual_joint_pos"]
     all_dataset_actual_joint_vel = datasets["all_dataset_actual_joint_vel"]
     all_dataset_desired_joint_pos = datasets["all_dataset_desired_joint_pos"]

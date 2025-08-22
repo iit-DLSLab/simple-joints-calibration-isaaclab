@@ -3,7 +3,7 @@ import torch
 import os
 
 
-def load_datasets(expected_joint_order):
+def load_datasets(datasets_path, expected_joint_order):
     """
     Load the dataset from the specified path.
     Returns:
@@ -15,7 +15,6 @@ def load_datasets(expected_joint_order):
         dataset_fps: Frames per second of the dataset.
     """
 
-    datasets_path = "./datasets"
     files = os.listdir(datasets_path)
     number_of_files = len(files)
     print(f"Number of trajectory in '{datasets_path}': {len(files)}")
