@@ -30,8 +30,8 @@ os.system("renice -n -21 -p " + str(pid))
 os.system("echo -20 > /proc/" + str(pid) + "/autogroup")
 #for real time, launch it with chrt -r 99 python3 run_controller.py
 
-USE_MUJOCO_RENDER = True
-USE_MUJOCO_SIMULATION = True
+USE_MUJOCO_RENDER = False
+USE_MUJOCO_SIMULATION = False
 
 
 USE_SCHEDULER = True # This enable a call to the run function every tot seconds by using a ros2 timer
@@ -211,14 +211,14 @@ class Data_Collection_Node(Node):
 
             if self.calibration_reference_joint_positions is None:
                 print("Generating first a setpoint..")
-                hip_setpoint = np.random.uniform(-0.2, 0.5)
+                hip_setpoint = np.random.uniform(-0.0, 0.5)
                 thigh_setpoint = np.random.uniform(-1.0, 0.5)
                 calf_setpoint = np.random.uniform(-0., 1.5)
                 self.calibration_reference_joint_positions = LegsAttr(*[np.zeros((1, int(self.env.mjModel.nu/4))) for _ in range(4)])
                 self.calibration_reference_joint_positions.FL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
-                self.calibration_reference_joint_positions.FR = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+                self.calibration_reference_joint_positions.FR = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
                 self.calibration_reference_joint_positions.RL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
-                self.calibration_reference_joint_positions.RR = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+                self.calibration_reference_joint_positions.RR = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
                 self.start_collection_time = time.time()
 
 
