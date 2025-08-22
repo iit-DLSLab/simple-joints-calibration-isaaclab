@@ -198,12 +198,12 @@ def main():
         friction_static_values = friction_static_min + friction_static_step_indices * 0.05
         friction_dynamic_values = friction_dynamic_min + friction_dynamic_step_indices * 0.05
         # Apply the friction values to the robot
-        hip_stiffness = asset.actuators["hip"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
-        thigh_stiffness = asset.actuators["thigh"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
-        calf_stiffness = asset.actuators["calf"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
-        hip_damping = asset.actuators["hip"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
-        thigh_damping = asset.actuators["thigh"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
-        calf_damping = asset.actuators["calf"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
+        asset.actuators["hip"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
+        asset.actuators["thigh"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
+        asset.actuators["calf"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
+        asset.actuators["hip"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
+        asset.actuators["thigh"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
+        asset.actuators["calf"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
 
 
         error_joint_pos = torch.zeros(

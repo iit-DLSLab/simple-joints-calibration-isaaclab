@@ -15,7 +15,7 @@ def load_datasets(expected_joint_order):
         dataset_fps: Frames per second of the dataset.
     """
 
-    datasets_path = "./datasets"
+    datasets_path = "./datasets/aliengo/from_reality"
     files = os.listdir(datasets_path)
     number_of_files = len(files)
     print(f"Number of trajectory in '{datasets_path}': {len(files)}")

@@ -1,4 +1,4 @@
-robot = 'aliengo'  # 'aliengo', 'go1', 'go2', 'b2', 'hyqreal1', 'hyqreal2', 'mini_cheetah' 
+robot = 'hyqreal2'  # 'aliengo', 'go1', 'go2', 'b2', 'hyqreal1', 'hyqreal2', 'mini_cheetah' 
 
 # ----------------------------------------------------------------------------------------------------------------
 if(robot == "aliengo"):

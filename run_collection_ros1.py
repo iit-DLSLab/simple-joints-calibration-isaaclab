@@ -3,10 +3,8 @@
 # Authors:
 # Giulio Turrisi
 
-import rclpy 
-from rclpy.node import Node 
-from sensor_msgs.msg import Joy
-from dls2_msgs.msg import BaseStateMsg, BlindStateMsg, ControlSignalMsg, TrajectoryGeneratorMsg
+import rospy
+from dls_msgs.msg import rl_signal_in, rl_signal_out
 
 import time
 import numpy as np
@@ -30,42 +28,15 @@ os.system("renice -n -21 -p " + str(pid))
 os.system("echo -20 > /proc/" + str(pid) + "/autogroup")
 #for real time, launch it with chrt -r 99 python3 run_controller.py
 
-USE_MUJOCO_RENDER = False
-USE_MUJOCO_SIMULATION = False
+USE_MUJOCO_RENDER = True
+USE_MUJOCO_SIMULATION = True
 
 
-CONTROL_FREQ = 50 
+CONTROL_FREQ = 50
 
 
-class Data_Collection_Node(Node):
+class Basic_Locomotion_DLS_Isaaclab_Node():
     def __init__(self):
-        super().__init__('Data_Collection_Node')
-        # Subscribers and Publishers
-        self.subscription_base_state = self.create_subscription(BaseStateMsg,"/dls2/base_state", self.get_base_state_callback, 1)
-        self.subscription_blind_state = self.create_subscription(BlindStateMsg,"/dls2/blind_state", self.get_blind_state_callback, 1)
-        self.publisher_trajectory_generator = self.create_publisher(TrajectoryGeneratorMsg,"dls2/trajectory_generator", 1)
-        self.timer = self.create_timer(1.0/CONTROL_FREQ, self.compute_control)
-
-
-        # Safety check to not do anything until a first base and blind state are received
-        self.first_message_base_arrived = False
-        self.first_message_joints_arrived = False 
-
-        # Timing stuff
-        self.loop_time = 0.002
-        self.last_start_time = None
-        self.start_collection_time = None
-
-        # Base State
-        self.position = np.zeros(3)
-        self.orientation = np.zeros(4)
-        self.linear_velocity = np.zeros(3)
-        self.angular_velocity = np.zeros(3)
-
-        # Blind State
-        self.joint_positions = np.zeros(12)
-        self.joint_velocities = np.zeros(12)
-        self.feet_contact = np.zeros(4)
 
         # Mujoco env
         robot_name = config.robot
@@ -81,13 +52,9 @@ class Data_Collection_Node(Node):
         )
         self.env.reset(random=False)
 
-
-        
         self.last_render_time = time.time()
         if USE_MUJOCO_RENDER:
             self.env.render()
-
-        
 
         self.stand_up_and_down_actions = LegsAttr(*[np.zeros((1, int(self.env.mjModel.nu/4))) for _ in range(4)])
         keyframe_id = mujoco.mj_name2id(self.env.mjModel, mujoco.mjtObj.mjOBJ_KEY, "down")
@@ -106,7 +73,6 @@ class Data_Collection_Node(Node):
         self.saved_desired_joints_velocity = None
         self.num_traj_saved = 0
 
-
         # Interactive Command Line ----------------------------
         from console import Console
         self.console = Console(controller_node=self)
@@ -114,39 +80,50 @@ class Data_Collection_Node(Node):
         thread_console.daemon = True
         thread_console.start()
 
+        # Subscribers and Publishers
+        self.subscription_state = rospy.Subscriber("/rl/rl_signal_in", rl_signal_in, self.get_state_callback, tcp_nodelay=True, queue_size=1)
+        self.publisher = rospy.Publisher('/rl/rl_signal_out', rl_signal_out, queue_size=1)
+        self.timer = rospy.Timer(rospy.Duration(1.0/CONTROL_FREQ), self.compute_control)
+
+        # Safety check to not do anything until a first base and blind state are received
+        self.first_message_base_arrived = False
+        self.first_message_joints_arrived = False 
+
+        # Timing stuff
+        self.loop_time = 0.002
+        self.last_start_time = None
+
+        # Base State
+        self.position = np.zeros(3)
+        self.orientation = np.zeros(4)
+        self.linear_velocity = np.zeros(3)
+        self.angular_velocity = np.zeros(3)
+
+        # Blind State
+        self.joint_positions = np.zeros(12)
+        self.joint_velocities = np.zeros(12)
+    
 
 
-    def get_base_state_callback(self, msg):
+
+    def get_state_callback(self, msg):
         
-        self.position = np.array(msg.position)
-        # For the quaternion, the order is [w, x, y, z] on mujoco, and [x, y, z, w] on DLS2
-        self.orientation = np.roll(np.array(msg.orientation), 1)
-        self.linear_velocity = np.array(msg.linear_velocity)
-        # For the angular velocity, mujoco is in the base frame, and DLS2 is in the world frame
-        self.angular_velocity = np.array(msg.angular_velocity) 
+        self.position = np.array(msg.position) #world frame
+        # For the quaternion, the order is [w, x, y, z] on mujoco, and [x, y, z, w] on DLS1
+        self.orientation = np.roll(np.array(msg.orientation_quat), 1) #world frame
+        self.linear_velocity = np.array(msg.linear_velocity) #world frame
+        self.angular_velocity = np.array(msg.angular_velocity) #base frame
+
+        self.joint_positions = np.array(msg.joint_positions)
+        self.joint_velocities = np.array(msg.joint_velocities)
 
         self.first_message_base_arrived = True
-
-
-
-    def get_blind_state_callback(self, msg):
-        
-        self.joint_positions = np.array(msg.joints_position)
-        self.joint_velocities = np.array(msg.joints_velocity)
-        self.feet_contact = np.array(msg.feet_contact)
-
-        # Fix convention DLS2
-        self.joint_positions[0] = -self.joint_positions[0]
-        self.joint_positions[6] = -self.joint_positions[6]
-        self.joint_velocities[0] = -self.joint_velocities[0]
-        self.joint_velocities[6] = -self.joint_velocities[6]
-
         self.first_message_joints_arrived = True
 
         
 
 
-    def compute_control(self):
+    def compute_control(self, event):
         # Update the loop time
         start_time = time.perf_counter()
         if(self.last_start_time is not None):
@@ -326,19 +303,9 @@ class Data_Collection_Node(Node):
 
         
 
-        # Fix convention DLS2 and send PD target
-        desired_joint_pos.FL[0] = -desired_joint_pos.FL[0]
-        desired_joint_pos.RL[0] = -desired_joint_pos.RL[0] 
-
-        trajectory_generator_msg = TrajectoryGeneratorMsg()
-        trajectory_generator_msg.joints_position = np.concatenate([desired_joint_pos.FL, desired_joint_pos.FR, desired_joint_pos.RL, desired_joint_pos.RR], axis=0).flatten()
-        
-        desired_joint_vel = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
-        trajectory_generator_msg.joints_velocity = np.concatenate([desired_joint_vel.FL, desired_joint_vel.FR, desired_joint_vel.RL, desired_joint_vel.RR], axis=0).flatten()
-
-        #trajectory_generator_msg.kp = np.ones(12)*Kp
-        #trajectory_generator_msg.kd = np.ones(12)*Kd
-        self.publisher_trajectory_generator.publish(trajectory_generator_msg)
+        rl_signal_out_msg = rl_signal_out()
+        rl_signal_out_msg.desired_joint_positions = np.concatenate([desired_joint_pos.FL, desired_joint_pos.FR, desired_joint_pos.RL, desired_joint_pos.RR], axis=0).flatten()
+        self.publisher.publish(rl_signal_out_msg)
         
         
         
@@ -355,13 +322,11 @@ class Data_Collection_Node(Node):
 
 #---------------------------
 if __name__ == '__main__':
-    print('Hello from your lovely data_collection routine.')
-    rclpy.init()
-    data_collection_node = Data_Collection_Node()
+    print('Hello from basic-locomotion-dls-isaaclab ros node.')
+    
+    rospy.init_node('basic_locomotion_dls_isaaclab_node', anonymous=True)
+    basic_locomotion_dls_isaaclab_node = Basic_Locomotion_DLS_Isaaclab_Node()
+    rospy.spin()
 
-    rclpy.spin(data_collection_node)
-    data_collection_node.destroy_node()
-    rclpy.shutdown()
-
-    print("Data-Collection-Node is stopped")
+    print("basic-locomotion-dls-isaaclab ros node is stopped")
     exit(0)
