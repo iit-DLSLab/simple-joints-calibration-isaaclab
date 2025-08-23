@@ -34,8 +34,11 @@ else:
     raise ValueError(f"Robot {robot} not supported")
 
 
-Kp_sampling_interval = 0.5
+Kp_sampling_interval = 0.1
 Kd_sampling_interval = 0.1
+
+optimize_gain = True
+optimize_friction = True
 
 
 datasets_path = "./datasets/aliengo/from_reality"

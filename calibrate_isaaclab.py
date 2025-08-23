@@ -137,7 +137,7 @@ def main():
 
 
 
-    def single_iteration():
+    def single_iteration(num_best_candidates):
         timestep = 0
 
         # Sample different Kp and Kd values for each environment
@@ -299,46 +299,94 @@ def main():
         
         # Print the average errors
         avg_error = error_joint_pos.mean(dim=1) + error_joint_vel.mean(dim=1)
-        print("Average Joint Error:", avg_error)
+        #print("Average Joint Error:", avg_error)
+        #print("Minimum Joint Error: ", avg_error.min())
+        #print(f"Best Kp iteration: ", kp_values[avg_error.argmin()])
+        #print(f"Best Kd iteration: ", kd_values[avg_error.argmin()])
+        #print(f"Best Friction Static iteration: ", friction_static_values[avg_error.argmin()])
+        #print(f"Best Friction Dynamic iteration: ", friction_dynamic_values[avg_error.argmin()])
 
-        print("Minimum Joint Error: ", avg_error.min())
+        top_errors, top_indices = torch.topk(avg_error, k=min(num_best_candidates, args_cli.num_envs), largest=False)
+
+        return top_errors, kp_values[top_indices], kd_values[top_indices], friction_static_values[top_indices], friction_dynamic_values[top_indices]
 
 
-        print(f"Best Kp iteration: ", kp_values[avg_error.argmin()])
-        print(f"Best Kd iteration: ", kd_values[avg_error.argmin()])
-        print(f"Best Friction Static iteration: ", friction_static_values[avg_error.argmin()])
-        print(f"Best Friction Dynamic iteration: ", friction_dynamic_values[avg_error.argmin()])
 
-        return avg_error.min(), kp_values[avg_error.argmin()], kd_values[avg_error.argmin()], friction_static_values[avg_error.argmin()], friction_dynamic_values[avg_error.argmin()]
+    num_iterations = 20
+    num_best_candidates = 100
     
-
-
-    num_iterations = 10
-    min_error = 1000
-    best_kp = None
-    best_kd = None
-    best_friction_static = None
-    best_friction_dynamic = None
+    # Initialize buffers to store the best candidates across all iterations
+    best_errors_buffer = []
+    best_kp_buffer = []
+    best_kd_buffer = []
+    best_friction_static_buffer = []
+    best_friction_dynamic_buffer = []
+    
     for j in range(num_iterations):
         print("Iteration: ", j)
-        error, \
+        errors, \
         kp, \
         kd, \
         friction_static, \
-        friction_dynamic = single_iteration()
-        if(error < min_error):
-            min_error = error
-            best_kp = kp
-            best_kd = kd
-            best_friction_static = friction_static
-            best_friction_dynamic = friction_dynamic
+        friction_dynamic = single_iteration(num_best_candidates)
+        
+        # Add new candidates to the buffer
+        for i in range(len(errors)):
+            candidate = {
+                'error': errors[i].item(),
+                'kp': kp[i].tolist(),
+                'kd': kd[i].tolist(), 
+                'friction_static': friction_static[i].item(),
+                'friction_dynamic': friction_dynamic[i].item()
+            }
+            
+            # Check if this candidate already exists in the buffer
+            is_duplicate = False
+            for existing in zip(best_kp_buffer, best_kd_buffer, best_friction_static_buffer, best_friction_dynamic_buffer):
+                if (torch.allclose(torch.tensor(candidate['kp']), torch.tensor(existing[0]), atol=1e-6) and
+                    torch.allclose(torch.tensor(candidate['kd']), torch.tensor(existing[1]), atol=1e-6) and
+                    abs(candidate['friction_static'] - existing[2]) < 1e-6 and
+                    abs(candidate['friction_dynamic'] - existing[3]) < 1e-6):
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                best_errors_buffer.append(candidate['error'])
+                best_kp_buffer.append(candidate['kp'])
+                best_kd_buffer.append(candidate['kd'])
+                best_friction_static_buffer.append(candidate['friction_static'])
+                best_friction_dynamic_buffer.append(candidate['friction_dynamic'])
+        
+        # Sort by error and keep only the best num_best_candidates
+        if len(best_errors_buffer) > num_best_candidates:
+            # Create indices sorted by error
+            sorted_indices = sorted(range(len(best_errors_buffer)), key=lambda i: best_errors_buffer[i])
+            
+            # Keep only the best num_best_candidates
+            best_errors_buffer = [best_errors_buffer[i] for i in sorted_indices[:num_best_candidates]]
+            best_kp_buffer = [best_kp_buffer[i] for i in sorted_indices[:num_best_candidates]]
+            best_kd_buffer = [best_kd_buffer[i] for i in sorted_indices[:num_best_candidates]]
+            best_friction_static_buffer = [best_friction_static_buffer[i] for i in sorted_indices[:num_best_candidates]]
+            best_friction_dynamic_buffer = [best_friction_dynamic_buffer[i] for i in sorted_indices[:num_best_candidates]]
     
-    print("min_error: ", min_error)
-    print("Best Kp: ", best_kp)
-    print("Best Kd: ", best_kd)
-    print("Best Friction Static: ", best_friction_static)
-    print("Best Friction Dynamic: ", best_friction_dynamic)
+    print("Final Results:")
+    print("Best Errors: ", best_errors_buffer)
+    print("Best Kp: ", best_kp_buffer)
+    print("Best Kd: ", best_kd_buffer)
+    print("Best Friction Static: ", best_friction_static_buffer)
+    print("Best Friction Dynamic: ", best_friction_dynamic_buffer)
 
+    # take bounds of the best candidates
+    bound_kp = (torch.tensor(best_kp_buffer, device=env.device).min(dim=0)[0], torch.tensor(best_kp_buffer, device=env.device).max(dim=0)[0])
+    bound_kd = (torch.tensor(best_kd_buffer, device=env.device).min(dim=0)[0], torch.tensor(best_kd_buffer, device=env.device).max(dim=0)[0])
+    bound_friction_static = (torch.tensor(best_friction_static_buffer, device=env.device).min(dim=0)[0], torch.tensor(best_friction_static_buffer, device=env.device).max(dim=0)[0])
+    bound_friction_dynamic = (torch.tensor(best_friction_dynamic_buffer, device=env.device).min(dim=0)[0], torch.tensor(best_friction_dynamic_buffer, device=env.device).max(dim=0)[0])
+
+    print("Bounds founds:")
+    print("Best Kp: ", bound_kp)
+    print("Best Kd: ", bound_kd)
+    print("Best Friction Static: ", bound_friction_static)
+    print("Best Friction Dynamic: ", bound_friction_dynamic)
 
     # close the simulator
     env.close()
