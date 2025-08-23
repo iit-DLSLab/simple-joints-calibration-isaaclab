@@ -143,16 +143,16 @@ def main():
         # Sample different Kp and Kd values for each environment
         nominal_kp = config.Kp_walking
         nominal_kd = config.Kd_walking
+
         # Sample in steps of 0.5 within ±50% range
-        # Calculate the range in actual values
-        kp_range = nominal_kp * 0.5  # ±50% of nominal
-        kd_range = nominal_kd * 0.5  # ±50% of nominal
+        search_kp_bounds = config.search_Kp_bounds
+        search_kd_bounds = config.search_Kd_bounds
 
         # Create steps of 0.5 within the range
-        kp_min = nominal_kp - kp_range
-        kp_max = nominal_kp + kp_range
-        kd_min = nominal_kd - kd_range  
-        kd_max = nominal_kd + kd_range
+        kp_min = nominal_kp + search_kp_bounds[0]
+        kp_max = nominal_kp + search_kp_bounds[1]
+        kd_min = nominal_kd + search_kd_bounds[0]
+        kd_max = nominal_kd + search_kd_bounds[1]
 
         # Number of 0.5 steps in each direction
         kp_num_steps = int((kp_max - kp_min) / config.Kp_sampling_interval) + 1
@@ -181,23 +181,29 @@ def main():
         # Sample different friction static and dynamic values for each environment
         nominal_friction_static = config.friction_static
         nominal_friction_dynamic = config.friction_dynamic
+        
         # Sample in steps of 0.05 within ±50% range
-        friction_static_range = nominal_friction_static * 0.9  # ±50% of nominal
-        friction_dynamic_range = nominal_friction_dynamic * 0.9  # ±50% of nominal
+        search_friction_static_bounds = config.search_friction_static_bounds
+        search_friction_dynamic_bounds = config.search_friction_dynamic_bounds
+
         # Create steps of 0.05 within the range
-        friction_static_min = nominal_friction_static - friction_static_range
-        friction_static_max = nominal_friction_static + friction_static_range
-        friction_dynamic_min = nominal_friction_dynamic - friction_dynamic_range
-        friction_dynamic_max = nominal_friction_dynamic + friction_dynamic_range
+        friction_static_min = nominal_friction_static + search_friction_static_bounds[0]
+        friction_static_max = nominal_friction_static + search_friction_static_bounds[1]
+        friction_dynamic_min = nominal_friction_dynamic + search_friction_dynamic_bounds[0]
+        friction_dynamic_max = nominal_friction_dynamic + search_friction_dynamic_bounds[1]
+
         # Number of 0.05 steps in each direction
-        friction_static_num_steps = int((friction_static_max - friction_static_min) / 0.05) + 1
-        friction_dynamic_num_steps = int((friction_dynamic_max - friction_dynamic_min) / 0.05) + 1
+        friction_static_num_steps = int((friction_static_max - friction_static_min) / config.friction_static_sampling_interval) + 1
+        friction_dynamic_num_steps = int((friction_dynamic_max - friction_dynamic_min) / config.friction_dynamic_sampling_interval) + 1
+
         # Sample random step indices
         friction_static_step_indices = torch.randint(0, friction_static_num_steps, (args_cli.num_envs,), device=env.device)
         friction_dynamic_step_indices = torch.randint(0, friction_dynamic_num_steps, (args_cli.num_envs,), device=env.device)
+        
         # Convert to actual values
-        friction_static_values = friction_static_min + friction_static_step_indices * 0.05
-        friction_dynamic_values = friction_dynamic_min + friction_dynamic_step_indices * 0.05
+        friction_static_values = friction_static_min + friction_static_step_indices * config.friction_static_sampling_interval
+        friction_dynamic_values = friction_dynamic_min + friction_dynamic_step_indices * config.friction_dynamic_sampling_interval
+
         # Apply the friction values to the robot
         asset.actuators["hip"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
         asset.actuators["thigh"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
