@@ -30,8 +30,8 @@ os.system("renice -n -21 -p " + str(pid))
 os.system("echo -20 > /proc/" + str(pid) + "/autogroup")
 #for real time, launch it with chrt -r 99 python3 run_controller.py
 
-USE_MUJOCO_RENDER = False
-USE_MUJOCO_SIMULATION = False
+USE_MUJOCO_RENDER = True
+USE_MUJOCO_SIMULATION = True
 
 
 CONTROL_FREQ = 50 
@@ -115,7 +115,6 @@ class Data_Collection_Node(Node):
         thread_console.start()
 
 
-
     def get_base_state_callback(self, msg):
         
         self.position = np.array(msg.position)
@@ -144,6 +143,119 @@ class Data_Collection_Node(Node):
         self.first_message_joints_arrived = True
 
         
+    def _initialize_calibration_setpoint(self):
+        """Initialize calibration setpoint with random values"""
+        print("Generating first a setpoint..")
+        hip_setpoint = np.random.uniform(-0.0, 0.5)
+        thigh_setpoint = np.random.uniform(-1.0, 0.5)
+        calf_setpoint = np.random.uniform(-0., 1.5)
+        self.calibration_reference_joint_positions = LegsAttr(*[np.zeros((1, int(self.env.mjModel.nu/4))) for _ in range(4)])
+        self.calibration_reference_joint_positions.FL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+        self.calibration_reference_joint_positions.FR = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+        self.calibration_reference_joint_positions.RL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+        self.calibration_reference_joint_positions.RR = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+        self.start_collection_time = time.time()
+
+    def _get_desired_positions_and_gains(self, env):
+        """Get desired joint positions and control gains based on collection type"""
+        if self.console.setpoint_collection:
+            # Setpoint collection: maintain target position
+            desired_joint_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+            desired_joint_pos.FL = copy.deepcopy(self.calibration_reference_joint_positions.FL)
+            desired_joint_pos.FR = copy.deepcopy(self.calibration_reference_joint_positions.FR)
+            desired_joint_pos.RL = copy.deepcopy(self.calibration_reference_joint_positions.RL)
+            desired_joint_pos.RR = copy.deepcopy(self.calibration_reference_joint_positions.RR)
+            Kp = self.Kp_stand_up_and_down
+            Kd = self.Kd_stand_up_and_down
+            
+        elif self.console.falling_collection:
+            # Falling collection: target first, then free fall
+            if time.time() - self.start_collection_time > 2.0:
+                # Free falling!!
+                Kp = 0.0
+                Kd = 0.0
+                desired_joint_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+                desired_joint_pos.FL = np.zeros((int(env.mjModel.nu/4),)) + 20.
+                desired_joint_pos.FR = np.zeros((int(env.mjModel.nu/4),)) + 20.
+                desired_joint_pos.RL = np.zeros((int(env.mjModel.nu/4),)) + 20.
+                desired_joint_pos.RR = np.zeros((int(env.mjModel.nu/4),)) + 20.
+            else:
+                # Reach the target
+                Kp = self.Kp_stand_up_and_down
+                Kd = self.Kd_stand_up_and_down
+                desired_joint_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+                desired_joint_pos.FL = copy.deepcopy(self.calibration_reference_joint_positions.FL)
+                desired_joint_pos.FR = copy.deepcopy(self.calibration_reference_joint_positions.FR)
+                desired_joint_pos.RL = copy.deepcopy(self.calibration_reference_joint_positions.RL)
+                desired_joint_pos.RR = copy.deepcopy(self.calibration_reference_joint_positions.RR)
+                
+        return desired_joint_pos, Kp, Kd
+
+    def _collect_trajectory_data(self, joints_pos, joints_vel, desired_joint_pos):
+        """Collect trajectory data by concatenating and storing joint information"""
+        concatenated_actual_joints_position = np.concatenate([joints_pos.FL, joints_pos.FR,
+                                                            joints_pos.RL, joints_pos.RR])
+        concatenated_actual_joints_velocity = np.concatenate([joints_vel.FL, joints_vel.FR,
+                                                            joints_vel.RL, joints_vel.RR])
+        concatenated_desired_joints_position = np.concatenate([desired_joint_pos.FL, desired_joint_pos.FR,
+                                                            desired_joint_pos.RL, desired_joint_pos.RR])
+        concatenated_desired_joints_velocity = np.concatenate([joints_vel.FL*0.0, joints_vel.FR*0.0,
+                                                            joints_vel.RL*0.0, joints_vel.RR*0.0])
+
+        if self.saved_actual_joints_position is None:
+            self.saved_actual_joints_position = concatenated_actual_joints_position
+            self.saved_actual_joints_velocity = concatenated_actual_joints_velocity
+            self.saved_desired_joints_position = concatenated_desired_joints_position
+            self.saved_desired_joints_velocity = concatenated_desired_joints_velocity
+        else:
+            self.saved_actual_joints_position = np.vstack([self.saved_actual_joints_position, concatenated_actual_joints_position])
+            self.saved_actual_joints_velocity = np.vstack([self.saved_actual_joints_velocity, concatenated_actual_joints_velocity])
+            self.saved_desired_joints_position = np.vstack([self.saved_desired_joints_position, concatenated_desired_joints_position])
+            self.saved_desired_joints_velocity = np.vstack([self.saved_desired_joints_velocity, concatenated_desired_joints_velocity])
+
+    def _check_collection_complete(self, joints_pos, desired_joint_pos):
+        """Check if data collection is complete based on collection type"""
+        if self.console.setpoint_collection:
+            # Complete when target is reached or timeout
+            target_reached = (np.linalg.norm(desired_joint_pos.FL - joints_pos.FL) < 0.1 and
+                            np.linalg.norm(desired_joint_pos.FR - joints_pos.FR) < 0.1 and
+                            np.linalg.norm(desired_joint_pos.RL - joints_pos.RL) < 0.1 and
+                            np.linalg.norm(desired_joint_pos.RR - joints_pos.RR) < 0.1)
+            timeout = time.time() - self.start_collection_time > 2.0
+            return target_reached or timeout
+            
+        elif self.console.falling_collection:
+            # Complete after falling phase timeout
+            return time.time() - self.start_collection_time > 2.5
+
+    def _save_trajectory_data(self):
+        """Save collected trajectory data to file and reset buffers"""
+        self.calibration_reference_joint_positions = None
+
+        # Saving to file trajectory
+        desired_fps = CONTROL_FREQ
+        data = {
+            "joints_list": ["FL_hip_joint", "FL_thigh_joint", "FL_calf_joint", 
+                                "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint", 
+                                "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint", 
+                                "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"],
+            "actual_joints_position": self.saved_actual_joints_position,
+            "actual_joints_velocity": self.saved_actual_joints_velocity,
+            "desired_joints_position": self.saved_desired_joints_position,
+            "desired_joints_velocity": self.saved_desired_joints_velocity,
+            "fps": desired_fps,
+        }
+        # Save the data to an .npy file
+        output_file = f"datasets/traj_{self.num_traj_saved}.npy"
+        np.save(output_file, data)
+
+        self.num_traj_saved += 1
+        self.saved_actual_joints_position = None
+        self.saved_actual_joints_velocity = None
+        self.saved_desired_joints_position = None
+        self.saved_desired_joints_velocity = None
+
+        input("Press enter to continue.")
 
 
     def compute_control(self):
@@ -206,94 +318,27 @@ class Data_Collection_Node(Node):
             Kd = self.Kd_stand_up_and_down
             
 
-        elif(self.console.isActivated):
-
+        elif(self.console.isActivated and (self.console.setpoint_collection or self.console.falling_collection)):
+            
+            # Initialize setpoint if needed
             if self.calibration_reference_joint_positions is None:
-                print("Generating first a setpoint..")
-                hip_setpoint = np.random.uniform(-0.0, 0.5)
-                thigh_setpoint = np.random.uniform(-1.0, 0.5)
-                calf_setpoint = np.random.uniform(-0., 1.5)
-                self.calibration_reference_joint_positions = LegsAttr(*[np.zeros((1, int(self.env.mjModel.nu/4))) for _ in range(4)])
-                self.calibration_reference_joint_positions.FL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
-                self.calibration_reference_joint_positions.FR = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
-                self.calibration_reference_joint_positions.RL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
-                self.calibration_reference_joint_positions.RR = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
-                self.start_collection_time = time.time()
+                self._initialize_calibration_setpoint()
 
-
-            desired_joint_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
-            desired_joint_pos.FL = copy.deepcopy(self.calibration_reference_joint_positions.FL)
-            desired_joint_pos.FR = copy.deepcopy(self.calibration_reference_joint_positions.FR)
-            desired_joint_pos.RL = copy.deepcopy(self.calibration_reference_joint_positions.RL)
-            desired_joint_pos.RR = copy.deepcopy(self.calibration_reference_joint_positions.RR) 
-
-
-            concatenated_actual_joints_position = np.concatenate([joints_pos.FL, joints_pos.FR,
-                                                                joints_pos.RL, joints_pos.RR])
-            concatenated_actual_joints_velocity = np.concatenate([joints_vel.FL, joints_vel.FR,
-                                                                joints_vel.RL, joints_vel.RR])
-            concatenated_desired_joints_position = np.concatenate([desired_joint_pos.FL, desired_joint_pos.FR,
-                                                                desired_joint_pos.RL, desired_joint_pos.RR])
-            concatenated_desired_joints_velocity = np.concatenate([joints_vel.FL*0.0, joints_vel.FR*0.0,
-                                                                joints_vel.RL*0.0, joints_vel.RR*0.0])
-
-            if self.saved_actual_joints_position is None:
-                self.saved_actual_joints_position = concatenated_actual_joints_position
-                self.saved_actual_joints_velocity = concatenated_actual_joints_velocity
-                self.saved_desired_joints_position = concatenated_desired_joints_position
-                self.saved_desired_joints_velocity = concatenated_desired_joints_velocity
-            else:
-                self.saved_actual_joints_position  = np.vstack([self.saved_actual_joints_position, concatenated_actual_joints_position])
-                self.saved_actual_joints_velocity = np.vstack([self.saved_actual_joints_velocity, concatenated_actual_joints_velocity])
-                self.saved_desired_joints_position  = np.vstack([self.saved_desired_joints_position, concatenated_desired_joints_position])
-                self.saved_desired_joints_velocity = np.vstack([self.saved_desired_joints_velocity, concatenated_desired_joints_velocity])
-
-
-            if((np.linalg.norm(desired_joint_pos.FL - joints_pos.FL) < 0.1
-               and np.linalg.norm(desired_joint_pos.FR - joints_pos.FR) < 0.1
-               and np.linalg.norm(desired_joint_pos.RL - joints_pos.RL) < 0.1
-               and np.linalg.norm(desired_joint_pos.RR - joints_pos.RR) < 0.1)
-               or time.time() - self.start_collection_time > 2.0):
-                
-                self.calibration_reference_joint_positions = None
-
-                # Saving to file trajectory
-                desired_fps = CONTROL_FREQ
-                data = {
-                    "joints_list": ["FL_hip_joint", "FL_thigh_joint", "FL_calf_joint", 
-                                        "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint", 
-                                        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint", 
-                                        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"],
-                    "actual_joints_position": self.saved_actual_joints_position,
-                    "actual_joints_velocity": self.saved_actual_joints_velocity,
-                    "desired_joints_position": self.saved_desired_joints_position,
-                    "desired_joints_velocity": self.saved_desired_joints_velocity,
-                    "fps": desired_fps,
-                }
-                # Save the data to an .npy file
-                output_file = f"datasets/traj_{self.num_traj_saved}.npy"
-                np.save(output_file, data)
-
-                self.num_traj_saved += 1
-                self.saved_actual_joints_position = None
-                self.saved_actual_joints_velocity = None
-                self.saved_desired_joints_position = None
-                self.saved_desired_joints_velocity = None
-
-                input("Press enter to continue.")
-
-
-            # Impedence Loop
-            Kp = self.Kp_stand_up_and_down
-            Kd = self.Kd_stand_up_and_down
-      
-        else:
-            return
-
-
+            # Get desired joint positions and control gains based on collection type
+            desired_joint_pos, Kp, Kd = self._get_desired_positions_and_gains(env)
+            
+            # Collect data
+            self._collect_trajectory_data(joints_pos, joints_vel, desired_joint_pos)
+            
+            # Check if collection is complete
+            collection_complete = self._check_collection_complete(joints_pos, desired_joint_pos)
+            if collection_complete:
+                self._save_trajectory_data()
+            
         
         if USE_MUJOCO_SIMULATION:
             for j in range(10): #Hardcoded for now, if RL is 50Hz, this runs the simulation at 500Hz
+                qpos, qvel = env.mjData.qpos, env.mjData.qvel
                 joints_pos.FL = qpos[env.legs_qpos_idx.FL]
                 joints_pos.FR = qpos[env.legs_qpos_idx.FR]
                 joints_pos.RL = qpos[env.legs_qpos_idx.RL]
@@ -325,7 +370,6 @@ class Data_Collection_Node(Node):
                 self.env.step(action=action)
 
         
-
         # Fix convention DLS2 and send PD target
         desired_joint_pos.FL[0] = -desired_joint_pos.FL[0]
         desired_joint_pos.RL[0] = -desired_joint_pos.RL[0] 

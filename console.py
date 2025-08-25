@@ -14,6 +14,8 @@ class Console():
         self.controller_node = controller_node
 
         self.isDown = True
+        self.setpoint_collection = False
+        self.falling_collection = False
         self.isActivated = False
 
         # Autocomplete setup
@@ -81,8 +83,22 @@ class Console():
 
                     
                 elif(input_string == "startCollection"):
-                    self.isActivated = not self.isActivated
 
+                    mode = input("Select the collection mode (setpoint/falling): ")
+                    if(mode == "setpoint"):
+                        self.setpoint_collection = True
+                        self.falling_collection = False
+                        print("Setpoint collection mode activated")
+                    elif(mode == "falling"):
+                        self.setpoint_collection = False
+                        self.falling_collection = True
+                        print("Falling collection mode activated")
+                    else:
+                        print("Invalid mode selected")
+                        self.isActivated = False
+                        continue
+                    
+                    self.isActivated = True
 
                 elif(input_string == "help"):
                     self.print_all_commands()
