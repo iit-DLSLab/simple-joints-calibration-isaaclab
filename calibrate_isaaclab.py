@@ -5,8 +5,6 @@
 import argparse
 
 from isaaclab.app import AppLauncher
-# local imports
-import cli_args  # isort: skip
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -30,8 +28,6 @@ parser.add_argument(
 )
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 
-# append RSL-RL cli arguments
-cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
