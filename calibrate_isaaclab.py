@@ -140,17 +140,15 @@ def main():
         nominal_kp = config.Kp_walking
         nominal_kd = config.Kd_walking
 
-        # Sample in steps of 0.5 within ±50% range
+        # Sample in steps withing the bounds
         search_kp_bounds = config.search_Kp_bounds
         search_kd_bounds = config.search_Kd_bounds
-
-        # Create steps of 0.5 within the range
         kp_min = nominal_kp + search_kp_bounds[0]
         kp_max = nominal_kp + search_kp_bounds[1]
         kd_min = nominal_kd + search_kd_bounds[0]
         kd_max = nominal_kd + search_kd_bounds[1]
 
-        # Number of 0.5 steps in each direction
+        # with a given sampling interval
         kp_num_steps = int((kp_max - kp_min) / config.Kp_sampling_interval) + 1
         kd_num_steps = int((kd_max - kd_min) / config.Kd_sampling_interval) + 1
 
@@ -178,17 +176,15 @@ def main():
         nominal_friction_static = config.friction_static
         nominal_friction_dynamic = config.friction_dynamic
         
-        # Sample in steps of 0.05 within ±50% range
+        # Sample in steps withing the bounds
         search_friction_static_bounds = config.search_friction_static_bounds
         search_friction_dynamic_bounds = config.search_friction_dynamic_bounds
-
-        # Create steps of 0.05 within the range
         friction_static_min = nominal_friction_static + search_friction_static_bounds[0]
         friction_static_max = nominal_friction_static + search_friction_static_bounds[1]
         friction_dynamic_min = nominal_friction_dynamic + search_friction_dynamic_bounds[0]
         friction_dynamic_max = nominal_friction_dynamic + search_friction_dynamic_bounds[1]
 
-        # Number of 0.05 steps in each direction
+        # with a given sampling interval
         friction_static_num_steps = int((friction_static_max - friction_static_min) / config.friction_static_sampling_interval) + 1
         friction_dynamic_num_steps = int((friction_dynamic_max - friction_dynamic_min) / config.friction_dynamic_sampling_interval) + 1
 
