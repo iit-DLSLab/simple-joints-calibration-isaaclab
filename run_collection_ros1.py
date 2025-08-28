@@ -358,6 +358,8 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
 
         rl_signal_out_msg = rl_signal_out()
         rl_signal_out_msg.desired_joint_positions = np.concatenate([desired_joint_pos.FL, desired_joint_pos.FR, desired_joint_pos.RL, desired_joint_pos.RR], axis=0).flatten()
+        rl_signal_out_msg.kp = np.ones(12)*Kp
+        rl_signal_out_msg.kd = np.ones(12)*Kd
         self.publisher.publish(rl_signal_out_msg)
         
         
