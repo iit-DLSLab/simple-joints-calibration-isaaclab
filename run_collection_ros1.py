@@ -28,8 +28,8 @@ os.system("renice -n -21 -p " + str(pid))
 os.system("echo -20 > /proc/" + str(pid) + "/autogroup")
 #for real time, launch it with chrt -r 99 python3 run_controller.py
 
-USE_MUJOCO_RENDER = True
-USE_MUJOCO_SIMULATION = True
+USE_MUJOCO_RENDER = False
+USE_MUJOCO_SIMULATION = False
 
 
 CONTROL_FREQ = 50
@@ -147,7 +147,12 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
             
         elif self.console.falling_collection:
             # Falling collection: target first, then free fall
-            if time.time() - self.start_collection_time > 2.0:
+            random_coin = np.random.randint(0, 4)
+            if(random_coin == 0):
+                random_time = 0.0 #No waiting time, immediate fall
+            else:
+                random_time = 1.8
+            if time.time() - self.start_collection_time > (2.0-random_time):
                 # Free falling!!
                 Kp = 0.0
                 Kd = 0.0

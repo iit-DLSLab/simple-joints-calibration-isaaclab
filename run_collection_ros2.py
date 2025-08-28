@@ -170,7 +170,12 @@ class Data_Collection_Node(Node):
             
         elif self.console.falling_collection:
             # Falling collection: target first, then free fall
-            if time.time() - self.start_collection_time > 2.0:
+            random_coin = np.random.randint(0, 4)
+            if(random_coin == 0):
+                random_time = 0.0 #No waiting time, immediate fall
+            else:
+                random_time = 1.8
+            if time.time() - self.start_collection_time > (2.0-random_time):
                 # Free falling!!
                 Kp = 0.0
                 Kd = 0.0
@@ -314,8 +319,8 @@ class Data_Collection_Node(Node):
             desired_joint_pos.RR = self.stand_up_and_down_actions.RR
 
             # Impedence Loop
-            Kp = self.Kp_stand_up_and_down
-            Kd = self.Kd_stand_up_and_down
+            Kp = self.Kp_stand_up_and_down*0.0
+            Kd = self.Kd_stand_up_and_down*0.0
             
 
         elif(self.console.isActivated and (self.console.setpoint_collection or self.console.falling_collection)):
