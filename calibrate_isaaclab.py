@@ -140,25 +140,29 @@ def main():
         nominal_kp = config.Kp_walking
         nominal_kd = config.Kd_walking
 
-        # Sample in steps withing the bounds
-        search_kp_bounds = config.search_Kp_bounds
-        search_kd_bounds = config.search_Kd_bounds
-        kp_min = nominal_kp + search_kp_bounds[0]
-        kp_max = nominal_kp + search_kp_bounds[1]
-        kd_min = nominal_kd + search_kd_bounds[0]
-        kd_max = nominal_kd + search_kd_bounds[1]
+        if(config.optimize_gain):
+            # Sample in steps withing the bounds
+            search_kp_bounds = config.search_Kp_bounds
+            search_kd_bounds = config.search_Kd_bounds
+            kp_min = nominal_kp + search_kp_bounds[0]
+            kp_max = nominal_kp + search_kp_bounds[1]
+            kd_min = nominal_kd + search_kd_bounds[0]
+            kd_max = nominal_kd + search_kd_bounds[1]
 
-        # with a given sampling interval
-        kp_num_steps = int((kp_max - kp_min) / config.Kp_sampling_interval) + 1
-        kd_num_steps = int((kd_max - kd_min) / config.Kd_sampling_interval) + 1
+            # with a given sampling interval
+            kp_num_steps = int((kp_max - kp_min) / config.Kp_sampling_interval) + 1
+            kd_num_steps = int((kd_max - kd_min) / config.Kd_sampling_interval) + 1
 
-        # Sample random step indices
-        kp_step_indices = torch.randint(0, kp_num_steps, (args_cli.num_envs, 3), device=env.device)
-        kd_step_indices = torch.randint(0, kd_num_steps, (args_cli.num_envs, 3), device=env.device)
+            # Sample random step indices
+            kp_step_indices = torch.randint(0, kp_num_steps, (args_cli.num_envs, 3), device=env.device)
+            kd_step_indices = torch.randint(0, kd_num_steps, (args_cli.num_envs, 3), device=env.device)
 
-        # Convert to actual values
-        kp_values = kp_min + kp_step_indices * config.Kp_sampling_interval
-        kd_values = kd_min + kd_step_indices * config.Kd_sampling_interval
+            # Convert to actual values
+            kp_values = kp_min + kp_step_indices * config.Kp_sampling_interval
+            kd_values = kd_min + kd_step_indices * config.Kd_sampling_interval
+        else:
+            kp_values = torch.tensor([0.0, 0.0, 0.0], device=env.device).repeat(args_cli.num_envs,1)
+            kd_values = torch.tensor([0.0, 0.0, 0.0], device=env.device).repeat(args_cli.num_envs,1)
 
         # Apply the Kp and Kd values to the robot's joints
         asset_cfg = SceneEntityCfg("robot", joint_names=[".*"])
@@ -176,26 +180,30 @@ def main():
         nominal_friction_static = config.friction_static
         nominal_friction_dynamic = config.friction_dynamic
         
-        # Sample in steps withing the bounds
-        search_friction_static_bounds = config.search_friction_static_bounds
-        search_friction_dynamic_bounds = config.search_friction_dynamic_bounds
-        friction_static_min = nominal_friction_static + search_friction_static_bounds[0]
-        friction_static_max = nominal_friction_static + search_friction_static_bounds[1]
-        friction_dynamic_min = nominal_friction_dynamic + search_friction_dynamic_bounds[0]
-        friction_dynamic_max = nominal_friction_dynamic + search_friction_dynamic_bounds[1]
+        if(config.optimize_friction):
+            # Sample in steps withing the bounds
+            search_friction_static_bounds = config.search_friction_static_bounds
+            search_friction_dynamic_bounds = config.search_friction_dynamic_bounds
+            friction_static_min = nominal_friction_static + search_friction_static_bounds[0]
+            friction_static_max = nominal_friction_static + search_friction_static_bounds[1]
+            friction_dynamic_min = nominal_friction_dynamic + search_friction_dynamic_bounds[0]
+            friction_dynamic_max = nominal_friction_dynamic + search_friction_dynamic_bounds[1]
 
-        # with a given sampling interval
-        friction_static_num_steps = int((friction_static_max - friction_static_min) / config.friction_static_sampling_interval) + 1
-        friction_dynamic_num_steps = int((friction_dynamic_max - friction_dynamic_min) / config.friction_dynamic_sampling_interval) + 1
+            # with a given sampling interval
+            friction_static_num_steps = int((friction_static_max - friction_static_min) / config.friction_static_sampling_interval) + 1
+            friction_dynamic_num_steps = int((friction_dynamic_max - friction_dynamic_min) / config.friction_dynamic_sampling_interval) + 1
 
-        # Sample random step indices
-        friction_static_step_indices = torch.randint(0, friction_static_num_steps, (args_cli.num_envs,), device=env.device)
-        friction_dynamic_step_indices = torch.randint(0, friction_dynamic_num_steps, (args_cli.num_envs,), device=env.device)
+            # Sample random step indices
+            friction_static_step_indices = torch.randint(0, friction_static_num_steps, (args_cli.num_envs,), device=env.device)
+            friction_dynamic_step_indices = torch.randint(0, friction_dynamic_num_steps, (args_cli.num_envs,), device=env.device)
+            
+            # Convert to actual values
+            friction_static_values = friction_static_min + friction_static_step_indices * config.friction_static_sampling_interval
+            friction_dynamic_values = friction_dynamic_min + friction_dynamic_step_indices * config.friction_dynamic_sampling_interval
+        else:
+            friction_static_values = torch.tensor(nominal_friction_static, device=env.device).repeat(args_cli.num_envs)
+            friction_dynamic_values = torch.tensor(nominal_friction_dynamic, device=env.device).repeat(args_cli.num_envs)
         
-        # Convert to actual values
-        friction_static_values = friction_static_min + friction_static_step_indices * config.friction_static_sampling_interval
-        friction_dynamic_values = friction_dynamic_min + friction_dynamic_step_indices * config.friction_dynamic_sampling_interval
-
         # Apply the friction values to the robot
         asset.actuators["hip"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
         asset.actuators["thigh"].friction_static = friction_static_values.unsqueeze(1).repeat(1, 4)
@@ -260,14 +268,23 @@ def main():
                     """env.unwrapped._robot.write_joint_state_to_sim(
                         joint_pos, joint_vel, env_ids=env_ids
                     )"""
-                    
-                    # control the robot with the desired joint positions
-                    env.unwrapped._robot.set_joint_position_target(desired_joint_pos)
-                    for _ in range(env.unwrapped.cfg.decimation):
-                        env.unwrapped.scene.write_data_to_sim()
-                        # simulate
-                        env.unwrapped.sim.step(render=False)
-                        env.unwrapped.scene.update(dt=env.unwrapped.physics_dt)
+                    if(desired_joint_pos == torch.tensor([-20.0] * joint_pos.shape[0], device=env.device)).all():
+                        desired_joint_pos = desired_joint_pos*0.0
+                        # the robot has zero control and is falling!
+                        env.unwrapped._robot.set_joint_position_target(desired_joint_pos)
+                        for _ in range(env.unwrapped.cfg.decimation):
+                            env.unwrapped.scene.write_data_to_sim()
+                            # simulate
+                            env.unwrapped.sim.step(render=False)
+                            env.unwrapped.scene.update(dt=env.unwrapped.physics_dt)                        
+                    else:
+                        # control the robot with the desired joint positions
+                        env.unwrapped._robot.set_joint_position_target(desired_joint_pos)
+                        for _ in range(env.unwrapped.cfg.decimation):
+                            env.unwrapped.scene.write_data_to_sim()
+                            # simulate
+                            env.unwrapped.sim.step(render=False)
+                            env.unwrapped.scene.update(dt=env.unwrapped.physics_dt)
 
                     # And check the errors
                     joint_pos = torch.tensor(
@@ -310,9 +327,9 @@ def main():
 
 
 
-    num_iterations = 20
-    num_best_candidates = 100
-    
+    num_iterations = config.num_iterations
+    num_best_candidates = config.num_best_candidates
+
     # Initialize buffers to store the best candidates across all iterations
     best_errors_buffer = []
     best_kp_buffer = []

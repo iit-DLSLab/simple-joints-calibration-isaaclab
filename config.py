@@ -55,8 +55,10 @@ Kd_sampling_interval = 0.1
 friction_static_sampling_interval = 0.05
 friction_dynamic_sampling_interval = 0.05
 
-optimize_gain = True
+optimize_gain = False
 optimize_friction = True
 
+num_iterations = 20
+num_best_candidates = 100
 
 datasets_path = "./datasets/aliengo/from_reality"

@@ -115,6 +115,13 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
         self.joint_positions = np.array(msg.joint_positions)
         self.joint_velocities = np.array(msg.joint_velocities)
 
+        # Fix convention DLS
+        if(config.robot == "aliengo"):
+            self.joint_positions[0] = -self.joint_positions[0]
+            self.joint_positions[6] = -self.joint_positions[6]
+            self.joint_velocities[0] = -self.joint_velocities[0]
+            self.joint_velocities[6] = -self.joint_velocities[6]
+
         self.first_message_base_arrived = True
         self.first_message_joints_arrived = True
 
@@ -122,15 +129,24 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
     def _initialize_calibration_setpoint(self):
         """Initialize calibration setpoint with random values"""
         print("Generating first a setpoint..")
-        hip_setpoint = np.random.uniform(-0.0, 0.5)
-        thigh_setpoint = np.random.uniform(-1.0, 0.5)
-        calf_setpoint = np.random.uniform(-0., 1.5)
+        hip_setpoint = np.random.uniform(0.6, 1.8)
+        thigh_setpoint = np.random.uniform(-3.5, 0.5)
+        calf_setpoint = np.random.uniform(0., 1.5)
+        hip_setpoint = 0.6
         self.calibration_reference_joint_positions = LegsAttr(*[np.zeros((1, int(self.env.mjModel.nu/4))) for _ in range(4)])
         self.calibration_reference_joint_positions.FL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
         self.calibration_reference_joint_positions.FR = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
         self.calibration_reference_joint_positions.RL = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
         self.calibration_reference_joint_positions.RR = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
         self.start_collection_time = time.time()
+        
+        if self.console.falling_collection:
+            # This is used as a global variable to active the free falling phase one time per setpoint
+            self.free_falling_phase = False
+            self.final_falling_time = 0.35
+            #if(hip_setpoint > 1.5):
+            #    self.final_falling_time = 0.45
+            self.final_thrust_time = 0.2
 
 
     def _get_desired_positions_and_gains(self, env):
@@ -146,22 +162,8 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
             Kd = self.Kd_stand_up_and_down
             
         elif self.console.falling_collection:
-            # Falling collection: target first, then free fall
-            random_coin = np.random.randint(0, 4)
-            if(random_coin == 0):
-                random_time = 0.0 #No waiting time, immediate fall
-            else:
-                random_time = 1.8
-            if time.time() - self.start_collection_time > (2.0-random_time):
-                # Free falling!!
-                Kp = 0.0
-                Kd = 0.0
-                desired_joint_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
-                desired_joint_pos.FL = np.zeros((int(env.mjModel.nu/4),)) + 20.
-                desired_joint_pos.FR = np.zeros((int(env.mjModel.nu/4),)) + 20.
-                desired_joint_pos.RL = np.zeros((int(env.mjModel.nu/4),)) + 20.
-                desired_joint_pos.RR = np.zeros((int(env.mjModel.nu/4),)) + 20.
-            else:
+            temp = time.time() - self.start_collection_time
+            if(temp < self.final_thrust_time or temp > self.final_falling_time):
                 # Reach the target
                 Kp = self.Kp_stand_up_and_down
                 Kd = self.Kd_stand_up_and_down
@@ -170,7 +172,21 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
                 desired_joint_pos.FR = copy.deepcopy(self.calibration_reference_joint_positions.FR)
                 desired_joint_pos.RL = copy.deepcopy(self.calibration_reference_joint_positions.RL)
                 desired_joint_pos.RR = copy.deepcopy(self.calibration_reference_joint_positions.RR)
-                
+            
+            else:
+                # Free falling!!
+                Kp = 0.0
+                Kd = 0.0
+                desired_joint_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+                desired_joint_pos.FL = np.zeros((int(env.mjModel.nu/4),)) + 20.
+                desired_joint_pos.FR = np.zeros((int(env.mjModel.nu/4),)) + 20.
+                desired_joint_pos.RL = np.zeros((int(env.mjModel.nu/4),)) + 20.
+                desired_joint_pos.RR = np.zeros((int(env.mjModel.nu/4),)) + 20.
+                if(temp > self.final_thrust_time + 0.02 and temp < self.final_falling_time - 0.02):
+                    self.free_falling_phase = True
+                else:
+                    self.free_falling_phase = False
+
         return desired_joint_pos, Kp, Kd
 
 
@@ -184,6 +200,11 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
                                                             desired_joint_pos.RL, desired_joint_pos.RR])
         concatenated_desired_joints_velocity = np.concatenate([joints_vel.FL*0.0, joints_vel.FR*0.0,
                                                             joints_vel.RL*0.0, joints_vel.RR*0.0])
+
+        if(self.console.falling_collection and not self.free_falling_phase):
+            # Do not collect data during the anticipation phase
+            return
+        
 
         if self.saved_actual_joints_position is None:
             self.saved_actual_joints_position = concatenated_actual_joints_position
@@ -210,7 +231,7 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
             
         elif self.console.falling_collection:
             # Complete after falling phase timeout
-            return time.time() - self.start_collection_time > 2.5
+            return time.time() - self.start_collection_time > self.final_falling_time
 
 
     def _save_trajectory_data(self):
@@ -316,8 +337,24 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
             self._collect_trajectory_data(joints_pos, joints_vel, desired_joint_pos)
             
             # Check if collection is complete
-            collection_complete = self._check_collection_complete(joints_pos, desired_joint_pos)
+            collection_complete = self._check_collection_complete(joints_pos, desired_joint_pos)            
             if collection_complete:
+    
+                desired_joint_pos = LegsAttr(*[np.zeros((1, int(env.mjModel.nu/4))) for _ in range(4)])
+                desired_joint_pos.FL = copy.deepcopy(joints_pos.FL)
+                desired_joint_pos.FR = copy.deepcopy(joints_pos.FR)
+                desired_joint_pos.RL = copy.deepcopy(joints_pos.RL)
+                desired_joint_pos.RR = copy.deepcopy(joints_pos.RR)
+                Kp = self.Kp_stand_up_and_down
+                Kd = self.Kd_stand_up_and_down
+
+                # Hack for now
+                rl_signal_out_msg = rl_signal_out()
+                rl_signal_out_msg.desired_joint_positions = np.concatenate([desired_joint_pos.FL, desired_joint_pos.FR, desired_joint_pos.RL, desired_joint_pos.RR], axis=0).flatten()
+                rl_signal_out_msg.kp = np.ones(12)*Kp
+                rl_signal_out_msg.kd = np.ones(12)*Kd
+                self.publisher.publish(rl_signal_out_msg)
+                
                 self._save_trajectory_data()
 
 
@@ -355,6 +392,10 @@ class Basic_Locomotion_DLS_Isaaclab_Node():
                 self.env.step(action=action)
 
         
+        # Fix convention DLS and send PD target
+        if(config.robot == "aliengo"):
+            desired_joint_pos.FL[0] = -desired_joint_pos.FL[0]
+            desired_joint_pos.RL[0] = -desired_joint_pos.RL[0]   
 
         rl_signal_out_msg = rl_signal_out()
         rl_signal_out_msg.desired_joint_positions = np.concatenate([desired_joint_pos.FL, desired_joint_pos.FR, desired_joint_pos.RL, desired_joint_pos.RR], axis=0).flatten()
