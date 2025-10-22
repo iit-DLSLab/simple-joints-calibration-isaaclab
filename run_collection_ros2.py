@@ -34,7 +34,7 @@ USE_MUJOCO_RENDER = True
 USE_MUJOCO_SIMULATION = True
 
 
-CONTROL_FREQ = 50 
+CONTROL_FREQ = config.frequency_collection # Hz 
 
 
 class Data_Collection_Node(Node):

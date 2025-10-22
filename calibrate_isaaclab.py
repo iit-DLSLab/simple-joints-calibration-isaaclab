@@ -161,8 +161,10 @@ def main():
             kp_values = kp_min + kp_step_indices * config.Kp_sampling_interval
             kd_values = kd_min + kd_step_indices * config.Kd_sampling_interval
         else:
-            kp_values = torch.tensor([0.0, 0.0, 0.0], device=env.device).repeat(args_cli.num_envs,1)
-            kd_values = torch.tensor([0.0, 0.0, 0.0], device=env.device).repeat(args_cli.num_envs,1)
+            #kp_values = torch.tensor([0.0, 0.0, 0.0], device=env.device).repeat(args_cli.num_envs,1)
+            #kd_values = torch.tensor([0.0, 0.0, 0.0], device=env.device).repeat(args_cli.num_envs,1)
+            kp_values = torch.tensor(nominal_kp, device=env.device).repeat(args_cli.num_envs,3)
+            kd_values = torch.tensor(nominal_kd, device=env.device).repeat(args_cli.num_envs,3)
 
         # Apply the Kp and Kd values to the robot's joints
         asset_cfg = SceneEntityCfg("robot", joint_names=[".*"])
@@ -212,6 +214,27 @@ def main():
         asset.actuators["thigh"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
         asset.actuators["calf"].friction_dynamic = friction_dynamic_values.unsqueeze(1).repeat(1, 4)
 
+
+        if(config.optimize_armature):
+            # Sample in steps withing the bounds
+            search_armature_bounds = config.search_armature_bounds
+            armature_min = config.armature + search_armature_bounds[0]
+            armature_max = config.armature + search_armature_bounds[1]
+
+            # with a given sampling interval
+            armature_num_steps = int((armature_max - armature_min) / config.armature_sampling_interval) + 1
+
+            # Sample random step indices
+            armature_step_indices = torch.randint(0, armature_num_steps, (args_cli.num_envs,), device=env.device)
+            
+            # Convert to actual values
+            armature_values = armature_min + armature_step_indices * config.armature_sampling_interval
+        else:
+            armature_values = torch.tensor(config.armature, device=env.device).repeat(args_cli.num_envs)
+        # Apply the armature values to the robot
+        asset.actuators["hip"].armature = armature_values.unsqueeze(1).repeat(1, 4)
+        asset.actuators["thigh"].armature = armature_values.unsqueeze(1).repeat(1, 4)
+        asset.actuators["calf"].armature = armature_values.unsqueeze(1).repeat(1, 4)
 
         error_joint_pos = torch.zeros(
             (args_cli.num_envs, len(env.unwrapped._robot.joint_names)), dtype=torch.float32, device=env.device 
@@ -272,7 +295,11 @@ def main():
                         desired_joint_pos = desired_joint_pos*0.0
                         # the robot has zero control and is falling!
                         env.unwrapped._robot.set_joint_position_target(desired_joint_pos)
-                        for _ in range(env.unwrapped.cfg.decimation):
+
+                        decimation = int((1/config.frequency_collection)/env.unwrapped.physics_dt)
+
+                        #for _ in range(env.unwrapped.cfg.decimation):
+                        for _ in range(decimation):
                             env.unwrapped.scene.write_data_to_sim()
                             # simulate
                             env.unwrapped.sim.step(render=False)
@@ -280,7 +307,13 @@ def main():
                     else:
                         # control the robot with the desired joint positions
                         env.unwrapped._robot.set_joint_position_target(desired_joint_pos)
-                        for _ in range(env.unwrapped.cfg.decimation):
+
+                        decimation = int((1/config.frequency_collection)/env.unwrapped.physics_dt)
+                        
+                        # We may not use the decimation of the environment, 
+                        # because maybe we collect at a different frequency
+                        #for _ in range(env.unwrapped.cfg.decimation):
+                        for _ in range(decimation):
                             env.unwrapped.scene.write_data_to_sim()
                             # simulate
                             env.unwrapped.sim.step(render=False)
@@ -303,7 +336,6 @@ def main():
                         error_joint_vel[env_ids] += torch.abs(joint_vel - env.unwrapped._robot.data.joint_vel)
                     
 
-
                 timestep += 1
 
                 # env stepping
@@ -313,7 +345,7 @@ def main():
 
         
         # Print the average errors
-        avg_error = error_joint_pos.mean(dim=1) + error_joint_vel.mean(dim=1)
+        avg_error = error_joint_pos.mean(dim=1)# + error_joint_vel.mean(dim=1)
         #print("Average Joint Error:", avg_error)
         #print("Minimum Joint Error: ", avg_error.min())
         #print(f"Best Kp iteration: ", kp_values[avg_error.argmin()])
@@ -323,7 +355,7 @@ def main():
 
         top_errors, top_indices = torch.topk(avg_error, k=min(num_best_candidates, args_cli.num_envs), largest=False)
 
-        return top_errors, kp_values[top_indices], kd_values[top_indices], friction_static_values[top_indices], friction_dynamic_values[top_indices]
+        return top_errors, kp_values[top_indices], kd_values[top_indices], friction_static_values[top_indices], friction_dynamic_values[top_indices], armature_values[top_indices]
 
 
 
@@ -336,6 +368,7 @@ def main():
     best_kd_buffer = []
     best_friction_static_buffer = []
     best_friction_dynamic_buffer = []
+    best_armature_buffer = []
     
     for j in range(num_iterations):
         print("Iteration: ", j)
@@ -343,7 +376,8 @@ def main():
         kp, \
         kd, \
         friction_static, \
-        friction_dynamic = single_iteration(num_best_candidates)
+        friction_dynamic, \
+        armature = single_iteration(num_best_candidates)
         
         # Add new candidates to the buffer
         for i in range(len(errors)):
@@ -352,7 +386,8 @@ def main():
                 'kp': kp[i].tolist(),
                 'kd': kd[i].tolist(), 
                 'friction_static': friction_static[i].item(),
-                'friction_dynamic': friction_dynamic[i].item()
+                'friction_dynamic': friction_dynamic[i].item(),
+                'armature': armature[i].item()
             }
             
             # Check if this candidate already exists in the buffer
@@ -361,7 +396,8 @@ def main():
                 if (torch.allclose(torch.tensor(candidate['kp']), torch.tensor(existing[0]), atol=1e-6) and
                     torch.allclose(torch.tensor(candidate['kd']), torch.tensor(existing[1]), atol=1e-6) and
                     abs(candidate['friction_static'] - existing[2]) < 1e-6 and
-                    abs(candidate['friction_dynamic'] - existing[3]) < 1e-6):
+                    abs(candidate['friction_dynamic'] - existing[3]) < 1e-6 and
+                    abs(candidate['armature'] - existing[4]) < 1e-6):
                     is_duplicate = True
                     break
             
@@ -371,7 +407,8 @@ def main():
                 best_kd_buffer.append(candidate['kd'])
                 best_friction_static_buffer.append(candidate['friction_static'])
                 best_friction_dynamic_buffer.append(candidate['friction_dynamic'])
-        
+                best_armature_buffer.append(candidate['armature'])
+
         # Sort by error and keep only the best num_best_candidates
         if len(best_errors_buffer) > num_best_candidates:
             # Create indices sorted by error
@@ -383,25 +420,29 @@ def main():
             best_kd_buffer = [best_kd_buffer[i] for i in sorted_indices[:num_best_candidates]]
             best_friction_static_buffer = [best_friction_static_buffer[i] for i in sorted_indices[:num_best_candidates]]
             best_friction_dynamic_buffer = [best_friction_dynamic_buffer[i] for i in sorted_indices[:num_best_candidates]]
-    
+            best_armature_buffer = [best_armature_buffer[i] for i in sorted_indices[:num_best_candidates]]
+
     print("Final Results:")
     print("Best Errors: ", best_errors_buffer)
     print("Best Kp: ", best_kp_buffer)
     print("Best Kd: ", best_kd_buffer)
     print("Best Friction Static: ", best_friction_static_buffer)
     print("Best Friction Dynamic: ", best_friction_dynamic_buffer)
+    print("Best Armature: ", best_armature_buffer)
 
     # take bounds of the best candidates
     bound_kp = (torch.tensor(best_kp_buffer, device=env.device).min(dim=0)[0], torch.tensor(best_kp_buffer, device=env.device).max(dim=0)[0])
     bound_kd = (torch.tensor(best_kd_buffer, device=env.device).min(dim=0)[0], torch.tensor(best_kd_buffer, device=env.device).max(dim=0)[0])
     bound_friction_static = (torch.tensor(best_friction_static_buffer, device=env.device).min(dim=0)[0], torch.tensor(best_friction_static_buffer, device=env.device).max(dim=0)[0])
     bound_friction_dynamic = (torch.tensor(best_friction_dynamic_buffer, device=env.device).min(dim=0)[0], torch.tensor(best_friction_dynamic_buffer, device=env.device).max(dim=0)[0])
+    bound_armature = (torch.tensor(best_armature_buffer, device=env.device).min(dim=0)[0], torch.tensor(best_armature_buffer, device=env.device).max(dim=0)[0])
 
     print("Bounds founds:")
     print("Best Kp: ", bound_kp)
     print("Best Kd: ", bound_kd)
     print("Best Friction Static: ", bound_friction_static)
     print("Best Friction Dynamic: ", bound_friction_dynamic)
+    print("Best Armature: ", bound_armature)
 
     # close the simulator
     env.close()

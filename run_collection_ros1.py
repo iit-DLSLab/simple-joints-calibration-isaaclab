@@ -32,7 +32,7 @@ USE_MUJOCO_RENDER = False
 USE_MUJOCO_SIMULATION = False
 
 
-CONTROL_FREQ = 50
+CONTROL_FREQ = config.frequency_collection  # Hz
 
 
 class Basic_Locomotion_DLS_Isaaclab_Node():
