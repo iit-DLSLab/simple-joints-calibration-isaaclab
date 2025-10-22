@@ -392,7 +392,7 @@ def main():
             
             # Check if this candidate already exists in the buffer
             is_duplicate = False
-            for existing in zip(best_kp_buffer, best_kd_buffer, best_friction_static_buffer, best_friction_dynamic_buffer):
+            for existing in zip(best_kp_buffer, best_kd_buffer, best_friction_static_buffer, best_friction_dynamic_buffer, best_armature_buffer):
                 if (torch.allclose(torch.tensor(candidate['kp']), torch.tensor(existing[0]), atol=1e-6) and
                     torch.allclose(torch.tensor(candidate['kd']), torch.tensor(existing[1]), atol=1e-6) and
                     abs(candidate['friction_static'] - existing[2]) < 1e-6 and
