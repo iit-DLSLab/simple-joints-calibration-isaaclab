@@ -3,6 +3,35 @@
 # Authors:
 # Giulio Turrisi
 
+import sys
+import os 
+dir_path = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(dir_path+"/mujoco/")
+sys.path.append(dir_path+"/../")
+sys.path.append(dir_path+"/../scripts/rsl_rl")
+
+
+dir_path = Path(__file__).resolve().parent
+sys.path.append(str(dir_path / ".."))
+
+ros_ws = dir_path / "ros2_ws"
+setup_bash = ros_ws / "install" / "setup.bash"
+
+if not setup_bash.exists():
+    print("Building the msgs first...")
+    subprocess.run(["colcon", "build"], cwd=ros_ws, check=True)
+
+if os.environ.get("BASIC_LOCOMOTION_ROS2_SOURCED") != "1":
+    print("Sourcing ROS2 workspace and restarting script...")
+    cmd = (
+        f"source {shlex.quote(str(setup_bash))} && "
+        "export BASIC_LOCOMOTION_ROS2_SOURCED=1 && "
+        f"exec {shlex.quote(sys.executable)} "
+        + " ".join(shlex.quote(arg) for arg in [str(Path(__file__).resolve()), *sys.argv[1:]])
+    )
+    os.execv("/bin/bash", ["bash", "-c", cmd])
+
+
 import rclpy 
 from rclpy.node import Node 
 from dls2_interface.msg import BaseState, BlindState, Imu, TrajectoryGenerator
@@ -13,15 +42,8 @@ np.set_printoptions(precision=3, suppress=True)
 
 import threading
 import copy
-import os 
 import torch
 
-import sys
-import os 
-dir_path = os.path.dirname(os.path.realpath(__file__))
-sys.path.append(dir_path+"/mujoco/")
-sys.path.append(dir_path+"/../")
-sys.path.append(dir_path+"/../scripts/rsl_rl")
 
 import mujoco
 import mujoco.viewer
