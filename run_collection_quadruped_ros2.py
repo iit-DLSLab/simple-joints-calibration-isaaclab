@@ -3,8 +3,11 @@
 # Authors:
 # Giulio Turrisi
 
+import os
 import sys
-import os 
+import shlex
+import subprocess
+from pathlib import Path
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path+"/mujoco/")
 sys.path.append(dir_path+"/../")
@@ -57,8 +60,8 @@ os.system("renice -n -21 -p " + str(pid))
 os.system("echo -20 > /proc/" + str(pid) + "/autogroup")
 #for real time, launch it with chrt -r 99 python3 run_controller.py
 
-USE_MUJOCO_RENDER = True
-USE_MUJOCO_SIMULATION = True
+USE_MUJOCO_RENDER = False
+USE_MUJOCO_SIMULATION = False
 
 
 CONTROL_FREQ = config.frequency_collection # Hz 
@@ -94,7 +97,7 @@ class Data_Collection_Node(Node):
 
 
         # Create the environment -----------------------------------------------------------
-        self.mjModel = mujoco.MjModel.from_xml_path(dir_path + "/robot_model/" + config.robot + "/scene_flat.xml")
+        self.mjModel = mujoco.MjModel.from_xml_path(str(dir_path) + "/robot_model/" + config.robot + "/scene_flat.xml")
         self.mjData = mujoco.MjData(self.mjModel)
 
         if(USE_MUJOCO_RENDER):
