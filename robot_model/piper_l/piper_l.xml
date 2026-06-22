@@ -59,7 +59,7 @@
             
             <body name="link5" quat="0.707105 -0.707108 0 0">
               <inertial pos="0.0002 -0.06142 -0.00257" quat="0.609413 0.425035 -0.377108 0.552947" mass="0.38" diaginertia="0.000302439 0.000295278 0.000150843"/>
-              <joint name="joint5" pos="0 0 0" axis="0 0 -1" range="-1.22 1.22" damping="0.1" armature="0.01" frictionloss="0.1"/>
+              <joint name="joint5" pos="0 0 0" axis="0 0 1" range="-1.22 1.22" damping="0.1" armature="0.01" frictionloss="0.1"/>
               
               <geom type="mesh" rgba="1 1 1 1" mesh="link5" class="visual"/>
               <geom size="0.03 0.025" pos="0 -0.08 0.0" quat="1 1 0 0" type="capsule" class="collision"/>
