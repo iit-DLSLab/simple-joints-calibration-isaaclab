@@ -1,6 +1,6 @@
 import numpy as np
 
-robot = 'z1'  # 'aliengo', 'go1', 'go2', 'b2', 'hyqreal2', 'z1' 
+robot = 'piper_l'  # 'aliengo', 'go1', 'go2', 'b2', 'hyqreal2', 'z1', 'piper_l', 'a2'
 
 # ----------------------------------------------------------------------------------------------------------------
 if(robot == "aliengo"):
@@ -74,13 +74,13 @@ elif(robot =="z1"):
 
 elif(robot =="piper_l"):
     # Order joint1-joint2-joint3-joint4-joint5-joint6-gripper
-    Kp = np.array([50., 50., 50.,
-                   50., 50., 50.,
-                   50.])
+    Kp = np.array([10., 10., 10.,
+                   10., 10., 10.,
+                   10.])
 
-    Kd = np.array([2.5, 2.5, 2.5,
-                   2.5, 2.5, 2.5,
-                   2.5])
+    Kd = np.array([0.5, 0.5, 0.5,
+                   0.5, 0.5, 0.5,
+                   0.5])
 
 else:
     raise ValueError(f"Robot {robot} not supported")
