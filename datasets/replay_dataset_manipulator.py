@@ -56,8 +56,9 @@ if __name__ == '__main__':
             break
         
         joint_pos = dataset_actual_joint_pos[timestep]
+        if(config.robot == "piper_l"):
+            joint_pos = np.concatenate((joint_pos, -joint_pos[-1:])) # last joint is duplicated due to the gripper
         mjData.qpos = copy.deepcopy(joint_pos)
-
         if(timestep > 0):
             mjModel.opt.timestep = dataset_time[timestep] - dataset_time[timestep-1]
         else:
