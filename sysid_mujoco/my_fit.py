@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 import sys
+import xml.etree.ElementTree as ET
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +19,7 @@ from sysid_mujoco.common import chunk_processed_trajectory
 from sysid_mujoco.common import get_actuated_joint_and_actuator_names
 from sysid_mujoco.common import load_dataset_actuator_gains
 from sysid_mujoco.common import load_processed_dataset
+from sysid_mujoco.common import ProcessedTrajectory
 from sysid_mujoco.common import processed_to_sysid_trajectory
 
 import mujoco
@@ -109,10 +112,113 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _is_piper_robot(robot: str) -> bool:
+    return robot == "piper_l"
+
+
+def _model_joint_names(model) -> list[str]:
+    return [model.joint(joint_id).name for joint_id in range(model.njnt)]
+
+
+def _prepare_fixed_base_xml_for_fit(robot: str, model_xml: Path) -> Path:
+    if not _is_piper_robot(robot):
+        return model_xml
+
+    tree = ET.parse(model_xml)
+    root = tree.getroot()
+    joint_names = {
+        joint.get("name")
+        for joint in root.iter("joint")
+        if joint.get("name") is not None
+    }
+    if "joint8" not in joint_names:
+        raise ValueError("Piper model must contain `joint8`.")
+
+    sensor_element = root.find("sensor")
+    if sensor_element is None:
+        sensor_element = ET.SubElement(root, "sensor")
+
+    for sensor in sensor_element.findall("jointpos"):
+        if sensor.get("joint") == "joint8":
+            return model_xml
+
+    ET.SubElement(
+        sensor_element,
+        "jointpos",
+        {
+            "name": "joint8_pos",
+            "joint": "joint8",
+        },
+    )
+    tree.write(model_xml, encoding="utf-8", xml_declaration=True)
+    return model_xml
+
+
+def _insert_piper_mimic_joint8(
+    values: np.ndarray,
+    model_joint_names: list[str],
+    value_name: str,
+) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float64)
+    if values.ndim != 2:
+        raise ValueError(f"`{value_name}` must be a 2-D array.")
+    if "joint7" not in model_joint_names or "joint8" not in model_joint_names:
+        raise ValueError("Piper model must contain both `joint7` and `joint8`.")
+    if values.shape[1] == len(model_joint_names):
+        return values
+
+    source_joint_names = [name for name in model_joint_names if name != "joint8"]
+    if values.shape[1] != len(source_joint_names):
+        raise ValueError(
+            f"Piper `{value_name}` has {values.shape[1]} joints, expected "
+            f"{len(source_joint_names)} without `joint8` or "
+            f"{len(model_joint_names)} with `joint8`."
+        )
+
+    joint7_index = source_joint_names.index("joint7")
+    joint8_index = model_joint_names.index("joint8")
+    joint8_values = -values[:, joint7_index:joint7_index + 1]
+    return np.concatenate(
+        (
+            values[:, :joint8_index],
+            joint8_values,
+            values[:, joint8_index:],
+        ),
+        axis=1,
+    )
+
+
+def _extend_piper_state_to_joint8(
+    trajectory: ProcessedTrajectory,
+    model,
+) -> ProcessedTrajectory:
+    model_joint_names = _model_joint_names(model)
+    return replace(
+        trajectory,
+        measured_qpos=_insert_piper_mimic_joint8(
+            trajectory.measured_qpos,
+            model_joint_names,
+            "measured_qpos",
+        ),
+        measured_qvel=_insert_piper_mimic_joint8(
+            trajectory.measured_qvel,
+            model_joint_names,
+            "measured_qvel",
+        ),
+        desired_qpos=_insert_piper_mimic_joint8(
+            trajectory.desired_qpos,
+            model_joint_names,
+            "desired_qpos",
+        ),
+        joint_names=model_joint_names,
+    )
+
+
 def build_model_sequences_from_source(
     sysid,
     mujoco,
     model,
+    robot: str,
     dataset_paths: list[Path],
     chunk_size: int,
 ):
@@ -127,6 +233,8 @@ def build_model_sequences_from_source(
             model=model,
             mujoco=mujoco,
         )
+        if _is_piper_robot(robot):
+            processed = _extend_piper_state_to_joint8(processed, model)
         for chunk in chunk_processed_trajectory(processed, chunk_size):
             measurement_data, control_data, initial_state = processed_to_sysid_trajectory(sysid, model, chunk)
             measurement_ts.append(measurement_data)
@@ -144,16 +252,22 @@ def main() -> None:
     dataset_kp, dataset_kd = load_dataset_actuator_gains(args.dataset[0])
 
 
-    fixed_base_xml = build_fixed_base_model_xml(args.robot)
+    fixed_base_xml = _prepare_fixed_base_xml_for_fit(
+        args.robot,
+        build_fixed_base_model_xml(args.robot),
+    )
     fixed_base_spec = mujoco.MjSpec.from_file(str(fixed_base_xml))
     fixed_base_model = fixed_base_spec.compile()
     actuated_joint_names, _ = get_actuated_joint_and_actuator_names(mujoco, fixed_base_model)
-    fixed_base_xml = build_fixed_base_model_xml(
+    fixed_base_xml = _prepare_fixed_base_xml_for_fit(
         args.robot,
-        actuator_gains=build_actuator_gain_map(
-            actuated_joint_names,
-            dataset_kp,
-            dataset_kd,
+        build_fixed_base_model_xml(
+            args.robot,
+            actuator_gains=build_actuator_gain_map(
+                actuated_joint_names,
+                dataset_kp,
+                dataset_kd,
+            ),
         ),
     )
     fixed_base_spec = mujoco.MjSpec.from_file(str(fixed_base_xml))
@@ -163,6 +277,7 @@ def main() -> None:
         sysid=sysid,
         mujoco=mujoco,
         model=fixed_base_model,
+        robot=args.robot,
         dataset_paths=args.dataset,
         chunk_size=args.chunk_size,
     )
@@ -175,7 +290,7 @@ def main() -> None:
         sequence_names[i],
         initial_states[i],
         control_ts[i],
-        measurement_ts[i]
+        measurement_ts[i],
     ) for i in range(len(measurement_ts))]
 
     bounds = {
