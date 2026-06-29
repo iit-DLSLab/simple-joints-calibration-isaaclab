@@ -156,15 +156,13 @@ def load_dataset_actuator_gains(
     if num_joints is None:
         dof_pos = np.asarray(dataset["dof_pos"], dtype=np.float64)
         num_joints = int(dof_pos.shape[1])
+    if 'kp' not in dataset:
+        print(f"{dataset_path} does not contain `kp` switching to config default")
+    if 'kd' not in dataset:
+        print(f"{dataset_path} does not contain `kd` switching to config default")
 
-    if 'Kp' not in dataset:
-        print(f"{dataset_path} does not contain `Kp` switching to config default")
-    if 'Kd' not in dataset:
-        print(f"{dataset_path} does not contain `Kd` switching to config default")
-
-        kp = dataset['Kp'] if 'Kp' in dataset else np.full(num_joints, config.Kp, dtype=np.float64)  
-        kd = dataset['Kd'] if 'Kd' in dataset else np.full(num_joints, config.Kd, dtype=np.float64)
-    
+    kp = dataset['kp'] if 'kp' in dataset else np.full(num_joints, config.kp, dtype=np.float64)  
+    kd = dataset['kd'] if 'kd' in dataset else np.full(num_joints, config.kd, dtype=np.float64)
     return kp, kd
 
 
@@ -232,7 +230,7 @@ def _rewrite_actuators_as_general(
                 continue
             actuator_spec = {
                 "joint": joint_name,
-                "gear": "1",
+                "gear": actuator.get("gear", "1"),
             }
             actuator_name = actuator.get("name")
             if actuator_name is not None:

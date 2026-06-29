@@ -33,6 +33,10 @@ import config
 import numpy as np
 
 
+PIPER_TORQUE_SCALE = 4.
+PIPER_TORQUE_SCALED_JOINTS = {"joint1", "joint2", "joint3"}
+
+
 def default_converted_paths(robot: str) -> list[Path]:
     return sorted((REPO_ROOT / "sysid_mujoco" / "converted" / robot).glob("*.npz"))
 
@@ -118,6 +122,24 @@ def _is_piper_robot(robot: str) -> bool:
 
 def _model_joint_names(model) -> list[str]:
     return [model.joint(joint_id).name for joint_id in range(model.njnt)]
+
+
+def _scale_actuator_gains_for_fit(
+    robot: str,
+    joint_names: list[str],
+    kp: np.ndarray,
+    kd: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    scaled_kp = np.asarray(kp, dtype=np.float64).copy()
+    scaled_kd = np.asarray(kd, dtype=np.float64).copy()
+    if not _is_piper_robot(robot):
+        return scaled_kp, scaled_kd
+
+    for index, joint_name in enumerate(joint_names):
+        if joint_name in PIPER_TORQUE_SCALED_JOINTS:
+            scaled_kp[index] *= PIPER_TORQUE_SCALE
+            scaled_kd[index] *= PIPER_TORQUE_SCALE
+    return scaled_kp, scaled_kd
 
 
 def _prepare_fixed_base_xml_for_fit(robot: str, model_xml: Path) -> Path:
@@ -259,14 +281,20 @@ def main() -> None:
     fixed_base_spec = mujoco.MjSpec.from_file(str(fixed_base_xml))
     fixed_base_model = fixed_base_spec.compile()
     actuated_joint_names, _ = get_actuated_joint_and_actuator_names(mujoco, fixed_base_model)
+    actuator_kp, actuator_kd = _scale_actuator_gains_for_fit(
+        args.robot,
+        actuated_joint_names,
+        dataset_kp,
+        dataset_kd,
+    )
     fixed_base_xml = _prepare_fixed_base_xml_for_fit(
         args.robot,
         build_fixed_base_model_xml(
             args.robot,
             actuator_gains=build_actuator_gain_map(
                 actuated_joint_names,
-                dataset_kp,
-                dataset_kd,
+                actuator_kp,
+                actuator_kd,
             ),
         ),
     )
