@@ -33,7 +33,8 @@ import config
 import numpy as np
 
 
-PIPER_TORQUE_SCALE = 4.
+PIPER_TORQUE_SCALE_KP = 30.0
+PIPER_TORQUE_SCALE_KD = 25.0
 PIPER_TORQUE_SCALED_JOINTS = {"joint1", "joint2", "joint3"}
 
 
@@ -94,7 +95,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(0.1, 3.0),
+        default=(0.01, 0.5),
         help="Bounds for each joint damping parameter.",
     )
     parser.add_argument(
@@ -102,7 +103,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(0.001, 0.6),
+        default=(0.01, 0.6),
         help="Bounds for each joint armature parameter.",
     )
     parser.add_argument(
@@ -110,7 +111,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(0.01, 5.0),
+        default=(0.001, 0.05),
         help="Bounds for each joint frictionloss parameter.",
     )
     return parser.parse_args()
@@ -137,8 +138,8 @@ def _scale_actuator_gains_for_fit(
 
     for index, joint_name in enumerate(joint_names):
         if joint_name in PIPER_TORQUE_SCALED_JOINTS:
-            scaled_kp[index] *= PIPER_TORQUE_SCALE
-            scaled_kd[index] *= PIPER_TORQUE_SCALE
+            scaled_kp[index] *= PIPER_TORQUE_SCALE_KP
+            scaled_kd[index] *= PIPER_TORQUE_SCALE_KD
     return scaled_kp, scaled_kd
 
 
@@ -333,6 +334,8 @@ def main() -> None:
         joint_names=joint_names,
         bounds=bounds,
     )
+    
+    params.move_off_bounds()
    
     residual_fn = residual_fn = sysid.build_residual_fn(models_sequences=model_sequences)
 

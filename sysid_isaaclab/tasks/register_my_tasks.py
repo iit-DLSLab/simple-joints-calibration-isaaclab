@@ -26,3 +26,12 @@ gym.register(
         "env_cfg_entry_point": "tasks.aliengo_pace_env_cfg:AliengoPaceEnvCfg",
     },
 )
+
+gym.register(
+    id="IsaacLab-Pace-Piper",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": "tasks.piper_l_pace_env_cfg:PiperLPaceEnvCfg",
+    },
+)
