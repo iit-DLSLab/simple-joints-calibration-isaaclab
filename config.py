@@ -74,13 +74,13 @@ elif(robot =="z1"):
 
 elif(robot =="piper_l"):
     # Order joint1-joint2-joint3-joint4-joint5-joint6-gripper
-    Kp = np.array([0.625, 1.25, 1.25,
-                   2.5, 5., 5.0,
-                   2.5])
+    Kp = np.array([150.0, 150.0, 150.0,
+                   10.0, 10.0, 10.0,
+                   10.0])
 
-    Kd = np.array([0.05, 0.1, 0.1,
-                   0.2, 0.4, 0.4,
-                   0.2])
+    Kd = np.array([10.0, 10.0, 10.0,
+                   0.8, 0.8, 0.8,
+                   0.8])
 
 else:
     raise ValueError(f"Robot {robot} not supported")

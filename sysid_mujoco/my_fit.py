@@ -35,7 +35,7 @@ import numpy as np
 
 PIPER_TORQUE_SCALE_KP = 30.0
 PIPER_TORQUE_SCALE_KD = 25.0
-PIPER_TORQUE_SCALED_JOINTS = {"joint1", "joint2", "joint3"}
+PIPER_TORQUE_SCALED_JOINTS = {}
 
 
 def default_converted_paths(robot: str) -> list[Path]:
