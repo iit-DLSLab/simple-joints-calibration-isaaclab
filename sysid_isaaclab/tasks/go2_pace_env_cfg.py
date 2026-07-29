@@ -126,8 +126,8 @@ class Go2PaceCfg(PaceCfg):
         self.bounds_params[:12, 1] = 1.0  # armature between 1e-5 - 1.0 [kgm2]
         self.bounds_params[12:24, 1] = 7.0  # dof_damping between 0.0 - 7.0 [Nm s/rad]
         self.bounds_params[24:36, 1] = 1.0  # friction between 0.0 - 1.0
-        self.bounds_params[36:48, 0] = -0.1
-        self.bounds_params[36:48, 1] = 0.1  # bias between -0.1 - 0.1 [rad]
+        self.bounds_params[36:48, 0] = -0.0
+        self.bounds_params[36:48, 1] = 0.0  # bias between -0.1 - 0.1 [rad]
         self.bounds_params[48, 1] = 5.0  # delay between 0.0 - 5.0 [sim steps]
 
 

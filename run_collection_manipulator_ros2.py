@@ -58,8 +58,8 @@ os.system("renice -n -21 -p " + str(pid))
 os.system("echo -20 > /proc/" + str(pid) + "/autogroup")
 #for real time, launch it with chrt -r 99 python3 run_controller.py
 
-USE_MUJOCO_RENDER = True
-USE_MUJOCO_SIMULATION = True
+USE_MUJOCO_RENDER = False
+USE_MUJOCO_SIMULATION = False
 
 
 CONTROL_FREQ = config.frequency_collection # Hz 
@@ -303,8 +303,15 @@ class Data_Collection_Node(Node):
 
         # Update the mujoco model
         if(not USE_MUJOCO_SIMULATION):
-            self.mjData.qpos = copy.deepcopy(self.arm_joints_position)
-            self.mjData.qvel = copy.deepcopy(self.arm_joints_velocity)
+            if(config.robot == "piper_l"):
+                temp_arm_joint_pos = np.append(self.arm_joints_position, self.arm_joints_position[-1]*-1.)
+                temp_arm_joint_vel = np.append(self.arm_joints_velocity, self.arm_joints_velocity[-1]*-1.)
+            else:
+                temp_arm_joint_pos = self.arm_joints_position
+                temp_arm_joint_vel = self.arm_joints_velocity
+
+            self.mjData.qpos = copy.deepcopy(temp_arm_joint_pos)
+            self.mjData.qvel = copy.deepcopy(temp_arm_joint_vel)
             mujoco.mj_forward(self.mjModel, self.mjData)  
 
 
