@@ -65,9 +65,12 @@ PIPER_WRIST_ACTUATOR_CFG = PaceDCMotorCfg(
 
 PIPER_GRIPPER_ACTUATOR_CFG = PaceDCMotorCfg(
     joint_names_expr=["joint7"],
-    saturation_effort=0.5,
-    effort_limit=0.5,
-    velocity_limit=0.5,
+    #saturation_effort=0.5,
+    #effort_limit=0.5,
+    #velocity_limit=0.5,
+    saturation_effort=2.0,
+    effort_limit=2.0,
+    velocity_limit=2.0,
     stiffness={"joint7": 10},
     damping={"joint7": 0.8},
     encoder_bias={".*": 0.0},
