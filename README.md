@@ -28,9 +28,9 @@ conda activate sim2real_robot_identification_ros2_env
 4. install IsaacLab if you need it
 
 ## Run a collection
-This repo works best with [unitree-ros2-dls](https://github.com/iit-DLSLab/unitree-ros2-dls) for communicating with unitree go2, b2, a2, and z1 robots. Soon, will support agilex piper arms using [piper-ros2-dls2](https://github.com/iit-DLSLab/piper-ros2-dls2).
+This repo works best with [unitree-ros2-dls](https://github.com/iit-DLSLab/unitree-ros2-dls) for communicating with unitree go2, b2, a2, and z1 robots, and with [piper-ros2-dls2](https://github.com/iit-DLSLab/piper-ros2-dls2) for the agilex piper arm.
 
-1. Choose the robot and the gains in the  [config file](https://github.com/iit-DLSLab/sim2real-robot-identification/blob/main/config.py)
+1. Choose the robot and the gains in the  [config file](https://github.com/iit-DLSLab/sim2real-robot-identification/blob/main/config.py) or add yours in the [robot_model](./robot_model) folder.
 
 2. In the xml of your robot, add two keyframe (sys_id_1, sys_id_2) to define the start and end point of the chirp trajectory (see [here](https://github.com/iit-DLSLab/sim2real-robot-identification/blob/60e7e48a382dc4293e80062e2bd3f9dc70b7cfc8/robot_model/go2/go2.xml#L252) for an example)
 
@@ -39,7 +39,7 @@ This repo works best with [unitree-ros2-dls](https://github.com/iit-DLSLab/unitr
 python3 run_collection_quadruped_ros2.py
 python3 run_collection_manipulator_ros2.py
 ```
-modifying inside USE_MUJOCO_RENDER and USE_MUJOCO_SIMULATION depending on your usecase
+modifying inside USE_MUJOCO_RENDER and USE_MUJOCO_SIMULATION depending on your usecase.
 
 
 4. Visualize your trajectory running
@@ -49,6 +49,8 @@ python3 datasets/replay_dataset_manipulator.py
 ```
 
 ## Run a calibration in IsaacLab
+
+Add a new [task](./sysid_isaaclab/tasks) for a new robot, or use the one in this repo. Then
 
 ```bash
 python3 sysid_isaaclab/my_fit.py --headless
