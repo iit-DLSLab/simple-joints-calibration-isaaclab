@@ -480,6 +480,62 @@ def _as_scalar(value: Any) -> float:
     return float(np.asarray(value, dtype=np.float64).reshape(-1)[0])
 
 
+def get_identifiable_body_names(
+    model,
+    requested_body_names: list[str] | None = None,
+) -> list[str]:
+    """Return massive bodies whose inertia can affect an articulated joint.
+
+    When names are supplied explicitly, only existence, uniqueness, and a
+    positive nominal mass are checked.  Otherwise the fixed base and other
+    bodies upstream of every joint are omitted because their inertial
+    parameters cannot be observed in a fixed-base experiment.
+    """
+    if requested_body_names is not None:
+        duplicate_names = sorted(
+            {
+                name
+                for name in requested_body_names
+                if requested_body_names.count(name) > 1
+            }
+        )
+        if duplicate_names:
+            raise ValueError(
+                "Duplicate inertial body names: " + ", ".join(duplicate_names)
+            )
+
+        body_names: list[str] = []
+        for body_name in requested_body_names:
+            try:
+                body = model.body(body_name)
+            except KeyError as exc:
+                raise ValueError(
+                    f"Body `{body_name}` does not exist in the MuJoCo model."
+                ) from exc
+            if int(body.id) == 0:
+                raise ValueError("The MuJoCo world body has no inertial parameters.")
+            if _as_scalar(body.mass) <= 0.0:
+                raise ValueError(
+                    f"Body `{body_name}` must have a positive nominal mass."
+                )
+            body_names.append(body_name)
+        return body_names
+
+    body_names = []
+    for body_id in range(1, model.nbody):
+        body = model.body(body_id)
+        if not body.name or _as_scalar(body.mass) <= 0.0:
+            continue
+
+        ancestor_id = body_id
+        while ancestor_id > 0:
+            if int(model.body_jntnum[ancestor_id]) > 0:
+                body_names.append(body.name)
+                break
+            ancestor_id = int(model.body_parentid[ancestor_id])
+    return body_names
+
+
 def make_armature_modifier(joint_name):
     """Create a modifier that sets armature on a specific joint."""
     def modifier(spec, param):
@@ -499,7 +555,52 @@ def make_damping_modifier(joint_name):
     return modifier
 
 
-def build_parameter_dict(sysid, model, joint_names: list[str], bounds: dict[str, tuple[float, float]]):
+def make_body_mass_modifier(sysid, body_name: str):
+    """Adapt MuJoCo's one-element mass parameter to its scalar body setter."""
+    def modifier(spec, param):
+        return sysid.model_modifier.apply_body_mass_ipos(
+            spec,
+            body_name,
+            mass=param.value[0],
+        )
+    return modifier
+
+
+def _validate_relative_bounds(
+    bounds: tuple[float, float],
+    name: str,
+    nominal: float,
+    *,
+    positive: bool = False,
+) -> tuple[float, float]:
+    lower, upper = (float(value) for value in bounds)
+    if (
+        not np.isfinite(lower)
+        or not np.isfinite(upper)
+        or lower >= upper
+        or not lower <= nominal <= upper
+        or (positive and lower <= 0.0)
+    ):
+        qualifier = "positive, " if positive else ""
+        raise ValueError(
+            f"`{name}` must be {qualifier}ordered and contain its nominal value "
+            f"{nominal}; got ({lower}, {upper})."
+        )
+    return lower, upper
+
+
+def build_parameter_dict(
+    sysid,
+    model,
+    joint_names: list[str],
+    bounds: dict[str, tuple[float, float]],
+    *,
+    model_spec=None,
+    body_names: list[str] | None = None,
+    identify_link_mass: bool = False,
+    identify_center_of_mass: bool = False,
+    identify_inertia_tensor: bool = False,
+):
     parameter_dict = sysid.ParameterDict()
     for joint_name in joint_names:
         joint = model.joint(joint_name)
@@ -524,5 +625,88 @@ def build_parameter_dict(sysid, model, joint_names: list[str], bounds: dict[str,
                 parameter.value[:] = current_value*2
 
             parameter_dict.add(parameter)
+
+    if identify_link_mass or identify_center_of_mass or identify_inertia_tensor:
+        body_names = get_identifiable_body_names(model, body_names)
+        if not body_names:
+            raise ValueError(
+                "No massive articulated bodies are available for inertial "
+                "identification. Use explicit body names to override the default."
+            )
+        print("Inertial identification bodies:", body_names)
+    else:
+        body_names = []
+
+    if body_names:
+        if model_spec is None:
+            raise ValueError(
+                "`model_spec` is required for inertial identification."
+            )
+
+        mass_scale_bounds = _validate_relative_bounds(
+            bounds["link_mass_scale"],
+            "link_mass_scale bounds",
+            nominal=1.0,
+            positive=True,
+        )
+        com_offset_bounds = _validate_relative_bounds(
+            bounds["center_of_mass_offset"],
+            "center_of_mass_offset bounds",
+            nominal=0.0,
+        )
+        inertia_scale_bounds = _validate_relative_bounds(
+            bounds["inertia_tensor_scale"],
+            "inertia_tensor_scale bounds",
+            nominal=1.0,
+            positive=True,
+        )
+        shear_bounds = _validate_relative_bounds(
+            bounds["inertia_tensor_shear"],
+            "inertia_tensor_shear bounds",
+            nominal=0.0,
+        )
+
+        if identify_inertia_tensor:
+            inertia_type = sysid.InertiaType.Pseudo
+            parameter_suffix = "full_inertia"
+        elif identify_center_of_mass:
+            inertia_type = sysid.InertiaType.MassIpos
+            parameter_suffix = "mass_center_of_mass"
+        else:
+            inertia_type = sysid.InertiaType.Mass
+            parameter_suffix = "link_mass"
+
+        for body_name in body_names:
+            modifier = None
+            if inertia_type == sysid.InertiaType.Mass:
+                # MuJoCo 3.11's default Mass modifier passes a shape-(1,)
+                # ndarray to a scalar MjsBody.mass setter.
+                modifier = make_body_mass_modifier(sysid, body_name)
+            parameter_dict.add(
+                sysid.body_inertia_param(
+                    spec=model_spec.copy(),
+                    model=model,
+                    body_name=body_name,
+                    inertia_type=inertia_type,
+                    mass_bound_mult=np.asarray(
+                        mass_scale_bounds,
+                        dtype=np.float64,
+                    ),
+                    ipos_bound_off=np.asarray(
+                        com_offset_bounds,
+                        dtype=np.float64,
+                    ),
+                    stretch_bound_mult=np.asarray(
+                        inertia_scale_bounds,
+                        dtype=np.float64,
+                    ),
+                    shear_bound_off=np.asarray(
+                        shear_bounds,
+                        dtype=np.float64,
+                    ),
+                    param_name=f"{body_name}_{parameter_suffix}",
+                    modifier=modifier,
+                )
+            )
     print("Initial parameter vector:", parameter_dict.as_vector())
     return parameter_dict
