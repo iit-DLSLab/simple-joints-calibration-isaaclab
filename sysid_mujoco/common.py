@@ -38,85 +38,6 @@ class ProcessedTrajectory:
     kd: np.ndarray
 
 
-def _stub_colorama() -> None:
-    if importlib.util.find_spec("colorama") is not None:
-        return
-
-    class _Ansi:
-        def __getattr__(self, _name: str) -> str:
-            return ""
-
-    module = types.ModuleType("colorama")
-    module.Fore = _Ansi()
-    module.Style = _Ansi()
-    module.init = lambda *args, **kwargs: None
-    sys.modules.setdefault("colorama", module)
-
-
-def _stub_tabulate() -> None:
-    if importlib.util.find_spec("tabulate") is not None:
-        return
-
-    module = types.ModuleType("tabulate")
-
-    def tabulate(
-        rows: list[list[Any]],
-        headers: tuple[str, ...] | list[str] = (),
-        tablefmt: str | None = None,
-        disable_numparse: bool = False,
-    ) -> str:
-        del tablefmt
-        del disable_numparse
-        lines: list[str] = []
-        if headers:
-            lines.append(" | ".join(str(header) for header in headers))
-        for row in rows:
-            lines.append(" | ".join(str(value) for value in row))
-        return "\n".join(lines)
-
-    module.tabulate = tabulate
-    sys.modules.setdefault("tabulate", module)
-
-
-def _stub_default_report() -> None:
-    if importlib.util.find_spec("plotly") is not None:
-        return
-
-    report_package = types.ModuleType("mujoco.sysid.report")
-    defaults_module = types.ModuleType("mujoco.sysid.report.defaults")
-
-    def default_report(*args, **kwargs):
-        del args
-        del kwargs
-        raise RuntimeError(
-            "Plotly is not installed in the active environment, so "
-            "mujoco.sysid.default_report is unavailable."
-        )
-
-    defaults_module.default_report = default_report
-    sys.modules.setdefault("mujoco.sysid.report", report_package)
-    sys.modules.setdefault("mujoco.sysid.report.defaults", defaults_module)
-
-
-def import_mujoco():
-    import mujoco
-
-    if not hasattr(mujoco, "MjModel"):
-        raise RuntimeError(
-            "The active Python interpreter does not provide the DeepMind "
-            "MuJoCo API. Run these scripts with "
-            "`micromamba run -n mpx_env python ...`."
-        )
-    return mujoco
-
-
-def import_mujoco_sysid():
-    import mujoco
-    import mujoco.sysid as sysid
-
-    return mujoco, sysid
-
-
 def load_torch_dataset(dataset_path: Path) -> dict[str, np.ndarray]:
     import torch
 
@@ -133,20 +54,6 @@ def load_torch_dataset(dataset_path: Path) -> dict[str, np.ndarray]:
             dataset[key] = np.asarray(value)
     return dataset
 
-
-def _normalize_per_joint_values(
-    values: Any,
-    num_joints: int,
-) -> np.ndarray:
-    normalized = np.asarray(values, dtype=np.float64).reshape(-1)
-    if normalized.size == 1:
-        return np.full(num_joints, normalized[0], dtype=np.float64)
-    if normalized.size != num_joints:
-        raise ValueError(
-            f"Expected actuator gains to have size 1 or {num_joints}, "
-            f"got {normalized.size}."
-        )
-    return normalized
 
 def load_dataset_actuator_gains(
     dataset_path: Path,
@@ -318,12 +225,6 @@ def get_actuated_joint_and_actuator_names(mujoco, model) -> tuple[list[str], lis
         )
         joint_names.append(joint_name)
     return joint_names, actuator_names
-
-
-def build_measurement_names(joint_names: list[str]) -> list[str]:
-    return [f"{joint_name}_qpos" for joint_name in joint_names] + [
-        f"{joint_name}_qvel" for joint_name in joint_names
-    ]
 
 
 def compute_pd_torques(

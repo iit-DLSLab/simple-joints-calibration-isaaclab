@@ -23,14 +23,9 @@ from sysid_mujoco.common import ProcessedTrajectory
 from sysid_mujoco.common import processed_to_sysid_trajectory
 
 import mujoco
-import mujoco.rollout as rollout
 from mujoco import sysid
 import numpy as np
-import matplotlib.pyplot as plt
-import mediapy as media
-from absl import logging
 import config
-import numpy as np
 
 
 PIPER_TORQUE_SCALE_KP = 30.0
@@ -431,14 +426,14 @@ def main() -> None:
     
     params.move_off_bounds()
    
-    residual_fn = residual_fn = sysid.build_residual_fn(models_sequences=model_sequences)
+    residual_fn = sysid.build_residual_fn(models_sequences=model_sequences)
 
     opt_params, opt_result = sysid.optimize(
-    initial_params=params,
-    residual_fn=residual_fn,
-    optimizer='mujoco'
+        initial_params=params,
+        residual_fn=residual_fn,
+        optimizer=args.optimizer,
+        max_iters=args.max_iters,
     )
-
 
 
     output_dir = args.output_dir or default_output_dir(args.robot)
