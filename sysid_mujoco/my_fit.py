@@ -50,8 +50,8 @@ def default_output_dir(robot: str) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Estimate per-joint damping, armature, and frictionloss from "
-            "quadruped datasets using MuJoCo sysid."
+            "Estimate per-joint dynamics and optional per-link inertial "
+            "properties from robot datasets using MuJoCo sysid."
         )
     )
     parser.add_argument(
@@ -113,6 +113,72 @@ def parse_args() -> argparse.Namespace:
         metavar=("LOWER", "UPPER"),
         default=(0.001, 0.05),
         help="Bounds for each joint frictionloss parameter.",
+    )
+    parser.add_argument(
+        "--identify-link-mass",
+        action="store_true",
+        help="Also identify one mass parameter for each selected link.",
+    )
+    parser.add_argument(
+        "--identify-center-of-mass",
+        action="store_true",
+        help=(
+            "Identify mass and 3-D local center of mass for each selected link "
+            "using MuJoCo's MassIpos parameterization."
+        ),
+    )
+    parser.add_argument(
+        "--identify-inertia-tensor",
+        action="store_true",
+        help=(
+            "Identify full inertia (mass, CoM, and tensor) for each selected "
+            "link using MuJoCo's pseudo-inertia Cholesky parameterization."
+        ),
+    )
+    parser.add_argument(
+        "--inertial-bodies",
+        nargs="+",
+        default=None,
+        metavar="BODY",
+        help=(
+            "Body names used by the optional inertial parameters. By default, "
+            "all massive bodies downstream of a joint are used."
+        ),
+    )
+    parser.add_argument(
+        "--link-mass-scale-bounds",
+        nargs=2,
+        type=float,
+        metavar=("LOWER", "UPPER"),
+        default=(0.5, 1.5),
+        help="Mass bounds as multipliers of each link's nominal mass.",
+    )
+    parser.add_argument(
+        "--center-of-mass-offset-bounds",
+        nargs=2,
+        type=float,
+        metavar=("LOWER", "UPPER"),
+        default=(-0.02, 0.02),
+        help="Additive bounds in metres around every nominal CoM component.",
+    )
+    parser.add_argument(
+        "--inertia-tensor-scale-bounds",
+        nargs=2,
+        type=float,
+        metavar=("LOWER", "UPPER"),
+        default=(0.5, 1.5),
+        help=(
+            "Multiplicative stretch bounds for the physically consistent "
+            "inertia-tensor parameterization."
+        ),
+    )
+    parser.add_argument(
+        "--inertia-tensor-shear-bounds",
+        nargs=2,
+        type=float,
+        metavar=("LOWER", "UPPER"),
+        default=(-0.25, 0.25),
+        help="Dimensionless shear bounds for the inertia tensor.",
     )
     return parser.parse_args()
 
@@ -271,6 +337,17 @@ def main() -> None:
     args = parse_args()
     if not args.dataset:
         raise ValueError("Use --dataset to pass a dataset")
+    if args.inertial_bodies is not None and not any(
+        (
+            args.identify_link_mass,
+            args.identify_center_of_mass,
+            args.identify_inertia_tensor,
+        )
+    ):
+        raise ValueError(
+            "`--inertial-bodies` requires at least one optional inertial "
+            "identification flag."
+        )
 
     dataset_kp, dataset_kd = load_dataset_actuator_gains(args.dataset[0])
 
@@ -326,13 +403,30 @@ def main() -> None:
         "damping": tuple(float(value) for value in args.damping_bounds),
         "armature": tuple(float(value) for value in args.armature_bounds),
         "frictionloss": tuple(float(value) for value in args.frictionloss_bounds),
+        "link_mass_scale": tuple(
+            float(value) for value in args.link_mass_scale_bounds
+        ),
+        "center_of_mass_offset": tuple(
+            float(value) for value in args.center_of_mass_offset_bounds
+        ),
+        "inertia_tensor_scale": tuple(
+            float(value) for value in args.inertia_tensor_scale_bounds
+        ),
+        "inertia_tensor_shear": tuple(
+            float(value) for value in args.inertia_tensor_shear_bounds
+        ),
     }
 
     params = build_parameter_dict(
         sysid=sysid,
         model=fixed_base_model,
+        model_spec=fixed_base_spec,
         joint_names=joint_names,
         bounds=bounds,
+        body_names=args.inertial_bodies,
+        identify_link_mass=args.identify_link_mass,
+        identify_center_of_mass=args.identify_center_of_mass,
+        identify_inertia_tensor=args.identify_inertia_tensor,
     )
     
     params.move_off_bounds()
