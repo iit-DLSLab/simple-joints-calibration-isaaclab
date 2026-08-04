@@ -10,7 +10,7 @@
 
 ## Overwiew
 
-A system identification routine for IsaacLab and Mujoco, to estimate motor parameters, inertia, masses, and center of mass. It provides scripts for data collection on the real robot (the robot should be in the air with the base fixed if a quadruped, or on a table if a manipulator). 
+A system identification routine for IsaacLab and Mujoco, to estimate **motor parameters**, **inertia**, **mass**, and **center of mass**. It provides scripts for data collection on the real robot (the robot should be in the air with the base fixed if a quadruped, or on a table if a manipulator). 
 This repo interfaces directly with [Pace](https://github.com/leggedrobotics/pace-sim2real) and the new [sys-id functionality](https://github.com/google-deepmind/mujoco/blob/main/python/mujoco/sysid/README.md) of Mujoco.
 
 The models (usd and xml) identified so far can be found in the folder **robot_model**. 
