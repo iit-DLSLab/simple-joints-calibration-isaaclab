@@ -91,7 +91,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(0.01, 2.0),
+        default=(0.01, 3.0),
         help="Bounds for each joint damping parameter.",
     )
     parser.add_argument(
@@ -107,7 +107,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(0.001, 2.0),
+        default=(0.001, 3.0),
         help="Bounds for each joint frictionloss parameter.",
     )
     parser.add_argument(
@@ -175,6 +175,15 @@ def parse_args() -> argparse.Namespace:
         metavar=("LOWER", "UPPER"),
         default=(-0.25, 0.25),
         help="Dimensionless shear bounds for the inertia tensor.",
+    )
+    parser.add_argument(
+        "--tie-quadruped-inertias",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Use one mass/CoM/inertia parameter for corresponding FL, FR, RL, "
+            "and RR bodies (default: enabled)."
+        ),
     )
     return parser.parse_args()
 
@@ -466,6 +475,7 @@ def main() -> None:
         identify_link_mass=args.identify_link_mass,
         identify_center_of_mass=args.identify_center_of_mass,
         identify_inertia_tensor=args.identify_inertia_tensor,
+        tie_quadruped_inertias=args.tie_quadruped_inertias,
     )
     
     params.move_off_bounds()

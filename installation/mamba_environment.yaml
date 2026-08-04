@@ -31,3 +31,4 @@ dependencies:
   - plotly
   - mediapy
   - scipy
+  - gym-quadruped>=1.1.5

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 import types
 import xml.etree.ElementTree as ET
@@ -467,6 +468,63 @@ def make_body_mass_modifier(sysid, body_name: str):
     return modifier
 
 
+_LEG_PREFIXES = ("FL", "FR", "RL", "RR")
+_LEG_BODY_PATTERN = re.compile(r"^(FL|FR|RL|RR)_(.+)$")
+
+
+def group_quadruped_leg_bodies(body_names: list[str]) -> list[tuple[str, ...]]:
+    """Group corresponding FL/FR/RL/RR bodies, preserving input order.
+
+    A suffix is grouped only when all four legs are present. Partial groups and
+    bodies that do not use the standard quadruped naming convention remain
+    independent.
+    """
+    by_suffix: dict[str, dict[str, str]] = {}
+    for body_name in body_names:
+        match = _LEG_BODY_PATTERN.fullmatch(body_name)
+        if match is None:
+            continue
+        prefix, suffix = match.groups()
+        by_suffix.setdefault(suffix, {})[prefix] = body_name
+
+    complete_groups = {
+        suffix: tuple(by_prefix[prefix] for prefix in _LEG_PREFIXES)
+        for suffix, by_prefix in by_suffix.items()
+        if all(prefix in by_prefix for prefix in _LEG_PREFIXES)
+    }
+
+    groups: list[tuple[str, ...]] = []
+    consumed: set[str] = set()
+    for body_name in body_names:
+        if body_name in consumed:
+            continue
+        match = _LEG_BODY_PATTERN.fullmatch(body_name)
+        group = complete_groups.get(match.group(2)) if match else None
+        if group is None:
+            group = (body_name,)
+        groups.append(group)
+        consumed.update(group)
+    return groups
+
+
+def make_shared_body_inertia_modifier(sysid, body_names: tuple[str, ...]):
+    """Create one modifier that applies an inertial parameter to many bodies."""
+
+    def modifier(spec, param):
+        for body_name in body_names:
+            if param.inertia_type == sysid.InertiaType.Mass:
+                # Avoid MuJoCo 3.11's shape-(1,) array/scalar setter mismatch.
+                sysid.model_modifier.apply_body_mass_ipos(
+                    spec,
+                    body_name,
+                    mass=param.value[0],
+                )
+            else:
+                sysid.model_modifier.apply_body_inertia(spec, body_name, param)
+
+    return modifier
+
+
 def _validate_relative_bounds(
     bounds: tuple[float, float],
     name: str,
@@ -501,6 +559,7 @@ def build_parameter_dict(
     identify_link_mass: bool = False,
     identify_center_of_mass: bool = False,
     identify_inertia_tensor: bool = False,
+    tie_quadruped_inertias: bool = False,
 ):
     parameter_dict = sysid.ParameterDict()
     for joint_name in joint_names:
@@ -577,12 +636,28 @@ def build_parameter_dict(
             inertia_type = sysid.InertiaType.Mass
             parameter_suffix = "link_mass"
 
-        for body_name in body_names:
-            modifier = None
-            if inertia_type == sysid.InertiaType.Mass:
-                # MuJoCo 3.11's default Mass modifier passes a shape-(1,)
-                # ndarray to a scalar MjsBody.mass setter.
-                modifier = make_body_mass_modifier(sysid, body_name)
+        body_groups = (
+            group_quadruped_leg_bodies(body_names)
+            if tie_quadruped_inertias
+            else [(body_name,) for body_name in body_names]
+        )
+        if tie_quadruped_inertias:
+            shared_groups = [group for group in body_groups if len(group) > 1]
+            if shared_groups:
+                print("Shared quadruped inertial groups:", shared_groups)
+
+        for body_group in body_groups:
+            body_name = body_group[0]
+            if len(body_group) > 1:
+                param_prefix = f"shared_{body_name.split('_', 1)[1]}"
+                modifier = make_shared_body_inertia_modifier(sysid, body_group)
+            else:
+                param_prefix = body_name
+                modifier = None
+                if inertia_type == sysid.InertiaType.Mass:
+                    # MuJoCo 3.11's default Mass modifier passes a shape-(1,)
+                    # ndarray to a scalar MjsBody.mass setter.
+                    modifier = make_body_mass_modifier(sysid, body_name)
             parameter_dict.add(
                 sysid.body_inertia_param(
                     spec=model_spec.copy(),
@@ -605,7 +680,7 @@ def build_parameter_dict(
                         shear_bounds,
                         dtype=np.float64,
                     ),
-                    param_name=f"{body_name}_{parameter_suffix}",
+                    param_name=f"{param_prefix}_{parameter_suffix}",
                     modifier=modifier,
                 )
             )
