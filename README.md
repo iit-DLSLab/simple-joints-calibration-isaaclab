@@ -21,8 +21,8 @@ The models (usd and xml) identified so far can be found in the folder **robot_mo
 2. create an environment using the file in the folder [installation](https://github.com/iit-DLSLab/sim2real-robot-identification/tree/main/installation)
 
 ```bash
-conda env create -f mamba_environment_ros2.yaml
-conda activate sim2real_robot_identification_ros2_env
+conda env create -f mamba_environment.yaml
+conda activate sim2real_robot_identification_env
 ```
 
 4. install IsaacLab if you need it
@@ -46,6 +46,7 @@ modifying inside USE_MUJOCO_RENDER and USE_MUJOCO_SIMULATION depending on your u
 ```bash
 python3 datasets/replay_dataset_quadruped.py
 python3 datasets/replay_dataset_manipulator.py
+python3 datasets/plot_joint_trajectories.py
 ```
 
 ## Run a calibration in IsaacLab

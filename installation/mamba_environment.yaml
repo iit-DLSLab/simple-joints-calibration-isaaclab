@@ -1,4 +1,4 @@
-name: sim2real_robot_identification_ros2_env
+name: sim2real_robot_identification_env
 channels:
 - conda-forge
 - nvidia
@@ -27,3 +27,4 @@ dependencies:
   - tabulate
   - plotly
   - mediapy
+  - scipy
