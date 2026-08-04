@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -34,11 +35,25 @@ def last_change(paths: list[Path]) -> str:
     return result.stdout.strip() or "—"
 
 
-def build_table() -> str:
+def identified_values(table: str) -> dict[str, str]:
+    """Read the manually maintained Identified cells from the current table."""
+    values = {}
+    for row in table.splitlines():
+        cells = [cell.strip() for cell in row.split("|")[1:-1]]
+        if len(cells) < 4:
+            continue
+
+        robot_match = re.fullmatch(r"\[([^]]+)]\([^)]+\)", cells[0])
+        if robot_match:
+            values[robot_match.group(1)] = cells[3]
+    return values
+
+
+def build_table(identified: dict[str, str]) -> str:
     rows = [
         START_MARKER,
-        "| Robot | Ultima modifica XML | Ultima modifica USD |",
-        "|:--|:--:|:--:|",
+        "| Robot | last modified XML | last modified USD | Identified |",
+        "|:--|:--:|:--:|:--:|",
     ]
 
     for robot_dir in sorted(path for path in MODELS_DIR.iterdir() if path.is_dir()):
@@ -53,7 +68,10 @@ def build_table() -> str:
 
         if any(value != "—" for value in dates.values()):
             robot_link = f"[{robot_dir.name}](./robot_model/{robot_dir.name})"
-            rows.append(f"| {robot_link} | {dates['XML']} | {dates['USD']} |")
+            rows.append(
+                f"| {robot_link} | {dates['XML']} | {dates['USD']} "
+                f"| {identified.get(robot_dir.name, '')} |"
+            )
 
     rows.append(END_MARKER)
     return "\n".join(rows)
@@ -65,8 +83,11 @@ def main() -> None:
         raise RuntimeError("Model-date markers are missing from README.md")
 
     before, remainder = content.split(START_MARKER, maxsplit=1)
-    _, after = remainder.split(END_MARKER, maxsplit=1)
-    README.write_text(f"{before}{build_table()}{after}", encoding="utf-8")
+    current_table, after = remainder.split(END_MARKER, maxsplit=1)
+    README.write_text(
+        f"{before}{build_table(identified_values(current_table))}{after}",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":
