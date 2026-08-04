@@ -15,7 +15,7 @@ This repo interfaces directly with [Pace](https://github.com/leggedrobotics/pace
 
 The models (usd and xml) identified so far can be found in the folder **robot_model**. 
 
-### Supported Robots
+## Supported Robots
 
 <!-- model-dates:start -->
 | Robot | last modified XML | last modified USD | Identified |
