@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -76,7 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-iters",
         type=int,
-        default=50,
+        default=30,
         help="Maximum optimizer iterations.",
     )
     parser.add_argument(
@@ -328,6 +329,49 @@ def build_model_sequences_from_source(
     return measurement_ts, control_ts, initial_states
 
 
+@contextmanager
+def _safe_parameter_distribution_spacing():
+    """Keep MuJoCo's parameter-distribution grid valid for many rows.
+
+    MuJoCo 3.11.0 hard-codes a vertical spacing of 0.05. Plotly rejects that
+    value when the report contains more than 21 subplot rows.
+    """
+    from mujoco.sysid.report.sections import parameter_distribution
+
+    plotly_subplots = parameter_distribution.plt_subplots
+    original_make_subplots = plotly_subplots.make_subplots
+
+    def make_subplots_with_safe_spacing(*args, **kwargs):
+        rows = kwargs.get("rows", 1)
+        vertical_spacing = kwargs.get("vertical_spacing")
+        if rows > 1 and vertical_spacing is not None:
+            maximum_spacing = 1.0 / (rows - 1)
+            if vertical_spacing > maximum_spacing:
+                kwargs["vertical_spacing"] = 0.5 / (rows - 1)
+        return original_make_subplots(*args, **kwargs)
+
+    plotly_subplots.make_subplots = make_subplots_with_safe_spacing
+    try:
+        yield
+    finally:
+        plotly_subplots.make_subplots = original_make_subplots
+
+
+def display_report(report, report_path: Path) -> Path:
+    html = report.build()
+    report_path.write_text(html, encoding="utf-8")
+    try:
+        from IPython import get_ipython
+        from IPython.display import HTML, display
+
+        if getattr(get_ipython(), "kernel", None) is not None:
+            display(HTML(html))
+    except Exception:
+        pass
+    print(f"Report written to {report_path}")
+    return report_path
+
+
 def main() -> None:
     args = parse_args()
     if not args.dataset:
@@ -439,30 +483,17 @@ def main() -> None:
     output_dir = args.output_dir or default_output_dir(args.robot)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    report = sysid.default_report(
-    models_sequences=model_sequences,
-    initial_params=params,
-    opt_params=opt_params,
-    residual_fn=residual_fn,
-    opt_result=opt_result,
-    title=f"System Identification Report for {args.robot}",
-    generate_videos=False,
-    )
-    def display_report(report, report_path: Path) -> Path:
-        html = report.build()
-        report_path.write_text(html, encoding="utf-8")
-        try:
-            from IPython import get_ipython
-            from IPython.display import HTML, display
-
-            if getattr(get_ipython(), "kernel", None) is not None:
-                display(HTML(html))
-        except Exception:
-            pass
-        print(f"Report written to {report_path}")
-        return report_path
-
-    display_report(report, output_dir / "report.html")
+    with _safe_parameter_distribution_spacing():
+        report = sysid.default_report(
+            models_sequences=model_sequences,
+            initial_params=params,
+            opt_params=opt_params,
+            residual_fn=residual_fn,
+            opt_result=opt_result,
+            title=f"System Identification Report for {args.robot}",
+            generate_videos=False,
+        )
+        display_report(report, output_dir / "report.html")
 
 
 if __name__ == "__main__":
