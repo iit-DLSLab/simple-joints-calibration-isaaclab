@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 import types
 import xml.etree.ElementTree as ET
@@ -456,6 +457,110 @@ def make_damping_modifier(joint_name):
     return modifier
 
 
+def make_shared_joint_attribute_modifier(
+    joint_names: tuple[str, ...],
+    attribute: str,
+):
+    """Create one modifier that applies a dynamic parameter to many joints."""
+    if attribute not in {"armature", "frictionloss", "damping"}:
+        raise ValueError(f"Unsupported shared joint attribute `{attribute}`.")
+
+    def modifier(spec, param):
+        for joint_name in joint_names:
+            joint = spec.joint(joint_name)
+            if attribute == "damping":
+                joint.damping[0] = param.value[0]
+            else:
+                setattr(joint, attribute, param.value[0])
+
+    return modifier
+
+
+def group_equality_constrained_joints(
+    model,
+    joint_names: list[str],
+) -> list[tuple[str, ...]]:
+    """Group joints connected by MuJoCo joint equality constraints.
+
+    Groups are transitive and preserve ``joint_names`` order. Equality
+    constraints that do not connect two selected joints are ignored.
+    """
+    import mujoco
+
+    ordered_names = list(dict.fromkeys(joint_names))
+    selected_names = set(ordered_names)
+    parent = {joint_name: joint_name for joint_name in ordered_names}
+
+    def find(joint_name: str) -> str:
+        while parent[joint_name] != joint_name:
+            parent[joint_name] = parent[parent[joint_name]]
+            joint_name = parent[joint_name]
+        return joint_name
+
+    def union(first: str, second: str) -> None:
+        first_root = find(first)
+        second_root = find(second)
+        if first_root != second_root:
+            parent[second_root] = first_root
+
+    joint_equality_type = int(mujoco.mjtEq.mjEQ_JOINT)
+    for equality_id in range(int(model.neq)):
+        if int(model.eq_type[equality_id]) != joint_equality_type:
+            continue
+        if (
+            hasattr(model, "eq_active0")
+            and not bool(model.eq_active0[equality_id])
+        ):
+            continue
+        first_id = int(model.eq_obj1id[equality_id])
+        second_id = int(model.eq_obj2id[equality_id])
+        if first_id < 0 or second_id < 0:
+            continue
+        first_name = model.joint(first_id).name
+        second_name = model.joint(second_id).name
+        if first_name in selected_names and second_name in selected_names:
+            union(first_name, second_name)
+
+    grouped_names: dict[str, list[str]] = {}
+    for joint_name in ordered_names:
+        grouped_names.setdefault(find(joint_name), []).append(joint_name)
+    return [tuple(group) for group in grouped_names.values()]
+
+
+def clip_parameter_values_inside_bounds(
+    parameter_dict,
+    margin_scale: float = 1e-6,
+):
+    """Clip free parameter values just inside their bounds.
+
+    Unlike ``ParameterDict.move_off_bounds``, the margin is based on the
+    current value scale rather than a fixed fraction of the full bound range.
+    Widening an upper bound therefore does not move an already-feasible
+    starting point by a large amount.
+    """
+    if not np.isfinite(margin_scale) or margin_scale <= 0.0:
+        raise ValueError("`margin_scale` must be positive and finite.")
+
+    values = parameter_dict.as_vector()
+    lower, upper = parameter_dict.get_bounds()
+    if values.size == 0:
+        return parameter_dict
+    if np.any(~np.isfinite(values)):
+        raise ValueError("Initial parameter values must be finite.")
+    if np.any(~np.isfinite(lower)) or np.any(~np.isfinite(upper)):
+        raise ValueError("Parameter bounds must be finite.")
+    if np.any(lower >= upper):
+        raise ValueError(
+            "Every lower parameter bound must be below its upper bound."
+        )
+
+    absolute_margin = margin_scale * np.maximum(1.0, np.abs(values))
+    margin = np.minimum(absolute_margin, 0.25 * (upper - lower))
+    clipped_values = np.clip(values, lower + margin, upper - margin)
+    parameter_dict.update_from_vector(clipped_values)
+    return parameter_dict
+
+
 def make_body_mass_modifier(sysid, body_name: str):
     """Adapt MuJoCo's one-element mass parameter to its scalar body setter."""
     def modifier(spec, param):
@@ -464,6 +569,63 @@ def make_body_mass_modifier(sysid, body_name: str):
             body_name,
             mass=param.value[0],
         )
+    return modifier
+
+
+_LEG_PREFIXES = ("FL", "FR", "RL", "RR")
+_LEG_BODY_PATTERN = re.compile(r"^(FL|FR|RL|RR)_(.+)$")
+
+
+def group_quadruped_leg_bodies(body_names: list[str]) -> list[tuple[str, ...]]:
+    """Group corresponding FL/FR/RL/RR bodies, preserving input order.
+
+    A suffix is grouped only when all four legs are present. Partial groups and
+    bodies that do not use the standard quadruped naming convention remain
+    independent.
+    """
+    by_suffix: dict[str, dict[str, str]] = {}
+    for body_name in body_names:
+        match = _LEG_BODY_PATTERN.fullmatch(body_name)
+        if match is None:
+            continue
+        prefix, suffix = match.groups()
+        by_suffix.setdefault(suffix, {})[prefix] = body_name
+
+    complete_groups = {
+        suffix: tuple(by_prefix[prefix] for prefix in _LEG_PREFIXES)
+        for suffix, by_prefix in by_suffix.items()
+        if all(prefix in by_prefix for prefix in _LEG_PREFIXES)
+    }
+
+    groups: list[tuple[str, ...]] = []
+    consumed: set[str] = set()
+    for body_name in body_names:
+        if body_name in consumed:
+            continue
+        match = _LEG_BODY_PATTERN.fullmatch(body_name)
+        group = complete_groups.get(match.group(2)) if match else None
+        if group is None:
+            group = (body_name,)
+        groups.append(group)
+        consumed.update(group)
+    return groups
+
+
+def make_shared_body_inertia_modifier(sysid, body_names: tuple[str, ...]):
+    """Create one modifier that applies an inertial parameter to many bodies."""
+
+    def modifier(spec, param):
+        for body_name in body_names:
+            if param.inertia_type == sysid.InertiaType.Mass:
+                # Avoid MuJoCo 3.11's shape-(1,) array/scalar setter mismatch.
+                sysid.model_modifier.apply_body_mass_ipos(
+                    spec,
+                    body_name,
+                    mass=param.value[0],
+                )
+            else:
+                sysid.model_modifier.apply_body_inertia(spec, body_name, param)
+
     return modifier
 
 
@@ -501,22 +663,40 @@ def build_parameter_dict(
     identify_link_mass: bool = False,
     identify_center_of_mass: bool = False,
     identify_inertia_tensor: bool = False,
+    tie_quadruped_inertias: bool = False,
 ):
     parameter_dict = sysid.ParameterDict()
-    for joint_name in joint_names:
-        joint = model.joint(joint_name)
-        for attribute in ("armature", "frictionloss","damping"):
+    joint_groups = group_equality_constrained_joints(model, joint_names)
+    shared_joint_groups = [group for group in joint_groups if len(group) > 1]
+    if shared_joint_groups:
+        print("Shared equality-constrained joint groups:", shared_joint_groups)
+
+    for joint_group in joint_groups:
+        for attribute in ("armature", "frictionloss", "damping"):
             lower, upper = bounds[attribute]
-            current_value = _as_scalar(getattr(joint, attribute))
-            parameter_name = f"{joint_name}_{attribute}"
+            current_value = float(
+                np.mean(
+                    [
+                        _as_scalar(getattr(model.joint(joint_name), attribute))
+                        for joint_name in joint_group
+                    ]
+                )
+            )
+            parameter_prefix = (
+                joint_group[0]
+                if len(joint_group) == 1
+                else "shared_" + "_".join(joint_group)
+            )
+            parameter_name = f"{parameter_prefix}_{attribute}"
             parameter = sysid.Parameter(
                 parameter_name,
                 nominal=current_value,
                 min_value=lower,
                 max_value=upper,
-                modifier=make_damping_modifier(joint_name) if attribute == "damping" else
-                         make_armature_modifier(joint_name) if attribute == "armature" else
-                         make_frictionloss_modifier(joint_name),
+                modifier=make_shared_joint_attribute_modifier(
+                    joint_group,
+                    attribute,
+                ),
             )
             if attribute == "frictionloss":
                 parameter.value[:] = current_value*0.1
@@ -577,12 +757,28 @@ def build_parameter_dict(
             inertia_type = sysid.InertiaType.Mass
             parameter_suffix = "link_mass"
 
-        for body_name in body_names:
-            modifier = None
-            if inertia_type == sysid.InertiaType.Mass:
-                # MuJoCo 3.11's default Mass modifier passes a shape-(1,)
-                # ndarray to a scalar MjsBody.mass setter.
-                modifier = make_body_mass_modifier(sysid, body_name)
+        body_groups = (
+            group_quadruped_leg_bodies(body_names)
+            if tie_quadruped_inertias
+            else [(body_name,) for body_name in body_names]
+        )
+        if tie_quadruped_inertias:
+            shared_groups = [group for group in body_groups if len(group) > 1]
+            if shared_groups:
+                print("Shared quadruped inertial groups:", shared_groups)
+
+        for body_group in body_groups:
+            body_name = body_group[0]
+            if len(body_group) > 1:
+                param_prefix = f"shared_{body_name.split('_', 1)[1]}"
+                modifier = make_shared_body_inertia_modifier(sysid, body_group)
+            else:
+                param_prefix = body_name
+                modifier = None
+                if inertia_type == sysid.InertiaType.Mass:
+                    # MuJoCo 3.11's default Mass modifier passes a shape-(1,)
+                    # ndarray to a scalar MjsBody.mass setter.
+                    modifier = make_body_mass_modifier(sysid, body_name)
             parameter_dict.add(
                 sysid.body_inertia_param(
                     spec=model_spec.copy(),
@@ -605,7 +801,7 @@ def build_parameter_dict(
                         shear_bounds,
                         dtype=np.float64,
                     ),
-                    param_name=f"{body_name}_{parameter_suffix}",
+                    param_name=f"{param_prefix}_{parameter_suffix}",
                     modifier=modifier,
                 )
             )
