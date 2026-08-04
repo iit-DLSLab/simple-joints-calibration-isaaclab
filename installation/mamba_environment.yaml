@@ -9,6 +9,9 @@ dependencies:
 - numpy
 - cuda-nvcc 
 - ros-humble-desktop
+- ros-humble-rmw-cyclonedds-cpp
+- ros-humble-rosidl-generator-dds-idl
+- ros-humble-plotjuggler-ros
 - compilers 
 - cmake 
 - pkg-config 
