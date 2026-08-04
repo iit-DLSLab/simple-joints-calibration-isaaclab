@@ -17,6 +17,7 @@ from sysid_mujoco.common import build_fixed_base_model_xml
 from sysid_mujoco.common import build_actuator_gain_map
 from sysid_mujoco.common import build_parameter_dict
 from sysid_mujoco.common import chunk_processed_trajectory
+from sysid_mujoco.common import clip_parameter_values_inside_bounds
 from sysid_mujoco.common import get_actuated_joint_and_actuator_names
 from sysid_mujoco.common import load_dataset_actuator_gains
 from sysid_mujoco.common import load_processed_dataset
@@ -107,7 +108,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(0.001, 3.0),
+        default=(0.001, 6.0),
         help="Bounds for each joint frictionloss parameter.",
     )
     parser.add_argument(
@@ -154,7 +155,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(-0.02, 0.02),
+        default=(-0.01, 0.01),
         help="Additive bounds in metres around every nominal CoM component.",
     )
     parser.add_argument(
@@ -478,7 +479,7 @@ def main() -> None:
         tie_quadruped_inertias=args.tie_quadruped_inertias,
     )
     
-    params.move_off_bounds()
+    clip_parameter_values_inside_bounds(params)
    
     residual_fn = sysid.build_residual_fn(models_sequences=model_sequences)
 
@@ -487,6 +488,7 @@ def main() -> None:
         residual_fn=residual_fn,
         optimizer=args.optimizer,
         max_iters=args.max_iters,
+        x_scale="jac",
     )
 
 
