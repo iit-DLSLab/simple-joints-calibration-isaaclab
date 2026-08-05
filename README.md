@@ -20,11 +20,11 @@ The models (usd and xml) identified so far can be found in the folder **robot_mo
 <!-- model-dates:start -->
 | Robot | last modified XML | last modified USD | Identified |
 |:--|:--:|:--:|:--:|
-| [a2](./robot_model/a2) | 2026-06-20 | — | ✓ |
+| [a2](./robot_model/a2) | 2026-08-04 | 2026-08-04 | ✓ |
 | [aliengo](./robot_model/aliengo) | 2026-05-13 | 2026-05-13 |  |
-| [go2](./robot_model/go2) | 2026-06-10 | 2026-05-13 | ✓ |
+| [go2](./robot_model/go2) | 2026-08-04 | 2026-05-13 | ✓ |
 | [hyqreal2](./robot_model/hyqreal2) | 2026-04-09 | 2026-03-24 | X |
-| [piper_l](./robot_model/piper_l) | 2026-07-29 | 2026-07-29 | ✓ |
+| [piper_l](./robot_model/piper_l) | 2026-08-04 | 2026-08-04 | ✓ |
 | [z1](./robot_model/z1) | 2026-04-21 | — | ✓ |
 <!-- model-dates:end -->
 

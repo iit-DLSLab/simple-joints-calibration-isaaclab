@@ -1,0 +1,45 @@
+name: Update model dates
+
+on:
+  push:
+    branches:
+      - main
+      - develop/symmetry
+    paths:
+      - "robot_model/**/*.xml"
+      - "robot_model/**/*.usd"
+      - "robot_model/**/*.usda"
+      - "robot_model/**/*.usdc"
+      - "scripts/update_model_dates.py"
+      - ".github/workflows/update-model-dates.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-model-dates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the complete Git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update model dates
+        run: python3 scripts/update_model_dates.py
+
+      - name: Commit the README when needed
+        run: |
+          if git diff --quiet -- README.md; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: update robot model dates"
+          git push
