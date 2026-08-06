@@ -1,0 +1,30 @@
+{
+  "robot": "piper_l",
+  "dataset": "/home/gturrisi/other_ws_home/sim2real-robot-identification/datasets/piper_l/trajectory_1.pt",
+  "model_xml": "/home/gturrisi/other_ws_home/sim2real-robot-identification/sysid_mujoco/generated/piper_l/piper_l_fixed_base_sysid.xml",
+  "num_samples": 4704,
+  "metrics": {
+    "rmse_mean": 0.0891296820265246,
+    "mae_mean": 0.07881010129389027,
+    "rmse_per_joint": {
+      "joint1": 0.08074697203527109,
+      "joint2": 0.17529106819537002,
+      "joint3": 0.10446429806107413,
+      "joint4": 0.07894233295822772,
+      "joint5": 0.17530194821821599,
+      "joint6": 0.08057598232887943,
+      "joint7": 0.008861962040529999,
+      "joint8": 0.008852892374628331
+    },
+    "mae_per_joint": {
+      "joint1": 0.0728541353899106,
+      "joint2": 0.1482787835612297,
+      "joint3": 0.09395373182623486,
+      "joint4": 0.07062211416727825,
+      "joint5": 0.15692211240174916,
+      "joint6": 0.07267080199546491,
+      "joint7": 0.007585250161851725,
+      "joint8": 0.007593880847402921
+    }
+  }
+}

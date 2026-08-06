@@ -421,6 +421,7 @@ def main() -> None:
         build_fixed_base_model_xml(args.robot),
     )
     fixed_base_spec = mujoco.MjSpec.from_file(str(fixed_base_xml))
+    fixed_base_spec.option.timestep = 1.0 / config.frequency_collection
     fixed_base_model = fixed_base_spec.compile()
     actuated_joint_names, _ = get_actuated_joint_and_actuator_names(mujoco, fixed_base_model)
     actuator_kp, actuator_kd = _scale_actuator_gains_for_fit(
@@ -441,6 +442,7 @@ def main() -> None:
         ),
     )
     fixed_base_spec = mujoco.MjSpec.from_file(str(fixed_base_xml))
+    fixed_base_spec.option.timestep = 1.0 / config.frequency_collection
     fixed_base_model = fixed_base_spec.compile()
 
     measurement_ts, control_ts, initial_states = build_model_sequences_from_source(

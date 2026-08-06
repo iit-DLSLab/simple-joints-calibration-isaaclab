@@ -140,12 +140,12 @@ def _rewrite_actuators_as_general(
                 "joint": joint_name,
                 "gear": actuator.get("gear", "1"),
             }
+            force_range = actuator.get("forcerange") or actuator.get("ctrlrange")
+            if force_range is not None:
+                actuator_spec["forcerange"] = force_range
             actuator_name = actuator.get("name")
             if actuator_name is not None:
                 actuator_spec["name"] = actuator_name
-            # force_range = actuator.get("forcerange") or actuator.get("ctrlrange")
-            # if force_range is not None:
-            #     actuator_spec["forcerange"] = force_range
             source_actuators.append(actuator_spec)
 
     _remove_all_by_tag(root, "motor")

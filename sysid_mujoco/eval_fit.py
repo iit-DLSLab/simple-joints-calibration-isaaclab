@@ -201,6 +201,7 @@ def simulate_open_loop(
     data = mujoco.MjData(model)
     times = trajectory.times
     ctrl = trajectory.ctrl
+    model.opt.timestep = 1.0 / config.frequency_collection
 
     if len(times) < 2:
         raise ValueError("The trajectory must contain at least two samples.")

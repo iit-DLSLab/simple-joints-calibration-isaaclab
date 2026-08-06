@@ -58,8 +58,8 @@ os.system("renice -n -21 -p " + str(pid))
 os.system("echo -20 > /proc/" + str(pid) + "/autogroup")
 #for real time, launch it with chrt -r 99 python3 run_controller.py
 
-USE_MUJOCO_RENDER = True
-USE_MUJOCO_SIMULATION = True
+USE_MUJOCO_RENDER = False
+USE_MUJOCO_SIMULATION = False
 
 
 CONTROL_FREQ = config.frequency_collection # Hz 
@@ -107,6 +107,8 @@ class Data_Collection_Node(Node):
         # Create the environment -----------------------------------------------------------
         self.mjModel = mujoco.MjModel.from_xml_path(str(dir_path) + "/robot_model/" + config.robot + "/scene_flat.xml")
         self.mjData = mujoco.MjData(self.mjModel)
+        if USE_MUJOCO_SIMULATION:
+            self.mjModel.opt.timestep = 1.0 / CONTROL_FREQ
 
         if(USE_MUJOCO_RENDER):
             self.viewer = mujoco.viewer.launch_passive(
@@ -258,10 +260,10 @@ class Data_Collection_Node(Node):
     def _collect_trajectory_data(self, joints_pos, joints_vel, desired_joint_pos):
         """Collect trajectory data by concatenating and storing joint information"""
         
-        concatenated_actual_joints_position = joints_pos
-        concatenated_actual_joints_velocity = joints_vel
-        concatenated_desired_joints_position = desired_joint_pos
-        concatenated_desired_joints_velocity = desired_joint_pos*0.0
+        concatenated_actual_joints_position = np.array(joints_pos, copy=True)
+        concatenated_actual_joints_velocity = np.array(joints_vel, copy=True)
+        concatenated_desired_joints_position = np.array(desired_joint_pos, copy=True)
+        concatenated_desired_joints_velocity = np.zeros_like(desired_joint_pos)
         
         error_joints_pos = desired_joint_pos - joints_pos                
         concatenated_commanded_joints_torque = config.Kp * (error_joints_pos) - config.Kd * joints_vel
@@ -311,8 +313,7 @@ class Data_Collection_Node(Node):
 
         # HACK
         num_steps = self.saved_actual_joints_position.shape[0]
-        duration = num_steps/CONTROL_FREQ
-        time_data = torch.linspace(0, duration, steps=num_steps, device="cpu")
+        time_data = torch.arange(num_steps, device="cpu") / CONTROL_FREQ
         dof_pos_buffer = torch.zeros(num_steps, 7, device="cpu")
         dof_vel_buffer = torch.zeros(num_steps, 7, device="cpu")
         dof_target_pos_buffer = torch.zeros(num_steps, 7, device="cpu")

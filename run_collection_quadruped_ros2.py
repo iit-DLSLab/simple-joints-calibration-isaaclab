@@ -103,6 +103,8 @@ class Data_Collection_Node(Node):
         # Create the environment -----------------------------------------------------------
         self.mjModel = mujoco.MjModel.from_xml_path(str(dir_path) + "/robot_model/" + config.robot + "/scene_flat.xml")
         self.mjData = mujoco.MjData(self.mjModel)
+        if USE_MUJOCO_SIMULATION:
+            self.mjModel.opt.timestep = 1.0 / CONTROL_FREQ
 
         if(USE_MUJOCO_RENDER):
             self.viewer = mujoco.viewer.launch_passive(
@@ -355,8 +357,7 @@ class Data_Collection_Node(Node):
 
         # HACK
         num_steps = self.saved_actual_joints_position.shape[0]
-        duration = num_steps/CONTROL_FREQ
-        time_data = torch.linspace(0, duration, steps=num_steps, device="cpu")
+        time_data = torch.arange(num_steps, device="cpu") / CONTROL_FREQ
         dof_pos_buffer = torch.zeros(num_steps, 12, device="cpu")
         dof_vel_buffer = torch.zeros(num_steps, 12, device="cpu")
         dof_target_pos_buffer = torch.zeros(num_steps, 12, device="cpu")
