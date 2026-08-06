@@ -39,6 +39,11 @@ def default_converted_paths(robot: str) -> list[Path]:
     return sorted((REPO_ROOT / "sysid_mujoco" / "converted" / robot).glob("*.npz"))
 
 
+def default_dataset_paths(robot: str) -> list[Path]:
+    """Return every dataset for the selected robot as an independent chunk."""
+    return sorted((REPO_ROOT / "datasets" / robot).glob("*.pt"))
+
+
 def default_output_dir(robot: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return REPO_ROOT / "sysid_mujoco" / "results" / robot / timestamp
@@ -60,8 +65,11 @@ def parse_args() -> argparse.Namespace:
         "--dataset",
         nargs="+",
         type=Path,
-        default=[Path(str(REPO_ROOT) + "/datasets/" + config.robot + "/traj_0.pt")],
-        help="Raw repository datasets (.pt). If provided, conversion is done in-memory.",
+        default=None,
+        help=(
+            "Optional raw repository datasets (.pt). By default, every .pt file "
+            "inside datasets/<robot> is loaded as an independent chunk."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -384,8 +392,15 @@ def display_report(report, report_path: Path) -> Path:
 
 def main() -> None:
     args = parse_args()
+    if args.dataset is None:
+        args.dataset = default_dataset_paths(args.robot)
     if not args.dataset:
-        raise ValueError("Use --dataset to pass a dataset")
+        dataset_dir = REPO_ROOT / "datasets" / args.robot
+        raise FileNotFoundError(f"No .pt datasets found in {dataset_dir}")
+
+    print(f"Loading {len(args.dataset)} dataset chunk(s) for {args.robot}:")
+    for dataset_path in args.dataset:
+        print(f"  - {dataset_path}")
     if args.inertial_bodies is not None and not any(
         (
             args.identify_link_mass,

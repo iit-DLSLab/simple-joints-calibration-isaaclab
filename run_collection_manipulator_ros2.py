@@ -58,11 +58,15 @@ os.system("renice -n -21 -p " + str(pid))
 os.system("echo -20 > /proc/" + str(pid) + "/autogroup")
 #for real time, launch it with chrt -r 99 python3 run_controller.py
 
-USE_MUJOCO_RENDER = False
-USE_MUJOCO_SIMULATION = False
+USE_MUJOCO_RENDER = True
+USE_MUJOCO_SIMULATION = True
 
 
 CONTROL_FREQ = config.frequency_collection # Hz 
+SETPOINT_REACH_TOLERANCE = 0.1
+SETPOINT_REACH_TIMEOUT = 2.0
+SETPOINT_STATIC_DURATION = 0.5
+INITIAL_CHIRP_TRAJECTORY_DURATION = 3.0
 
 def handle_parallel_gripper(array):
     if(config.robot == "piper_l"):
@@ -124,15 +128,18 @@ class Data_Collection_Node(Node):
         # the func will return the same array
         self.home_position = handle_parallel_gripper(self.home_position)
         self.goal_position = handle_parallel_gripper(self.goal_position)
+        self.idle_joint_position = copy.deepcopy(self.home_position)
 
         self.Kp = config.Kp
         self.Kd = config.Kd
 
         self.calibration_reference_joint_positions = None
+        self.setpoint_reached_time = None
+        self.setpoint_preview_active = False
         
 
         # Chirp Trajectory only variables
-        self.chirp_traj_time = 3.0
+        self.chirp_traj_time = INITIAL_CHIRP_TRAJECTORY_DURATION
         self.calibration_reference_trajectory = None
         
         self.saved_actual_joints_position = None
@@ -140,10 +147,6 @@ class Data_Collection_Node(Node):
         self.saved_desired_joints_position = None
         self.saved_desired_joints_velocity = None
         self.saved_commanded_joints_torque = None
-        self.num_traj_saved = 0
-
-
-
         # Interactive Command Line ----------------------------
         from console import Console
         self.console = Console(controller_node=self)
@@ -161,7 +164,48 @@ class Data_Collection_Node(Node):
 
         self.first_message_joints_arrived = True
 
-        
+    def prepare_calibration_setpoint(self):
+        """Generate and display a setpoint without commanding the robot."""
+        lower_bound = np.minimum(self.home_position, self.goal_position)
+        upper_bound = np.maximum(self.home_position, self.goal_position)
+        self.calibration_reference_joint_positions = np.random.uniform(
+            lower_bound, upper_bound
+        )
+        self.setpoint_preview_active = True
+        print("\nProposed setpoint (joint positions):")
+        print(self.calibration_reference_joint_positions)
+        if USE_MUJOCO_RENDER:
+            print("The proposed pose is shown in the MuJoCo viewer.")
+
+    def accept_calibration_setpoint(self):
+        """Start timing only after the operator has approved the setpoint."""
+        self.start_collection_time = time.time()
+        self.setpoint_reached_time = None
+        self.setpoint_preview_active = False
+
+    def reject_calibration_setpoint(self):
+        self.calibration_reference_joint_positions = None
+        self.start_collection_time = None
+        self.setpoint_reached_time = None
+        self.setpoint_preview_active = False
+
+    def _render_calibration_setpoint_preview(self):
+        """Render the proposed pose without changing the controller/simulation state."""
+        saved_qpos = self.mjData.qpos.copy()
+        saved_qvel = self.mjData.qvel.copy()
+
+        if config.robot == "piper_l":
+            self.mjData.qpos[:-1] = self.calibration_reference_joint_positions
+            self.mjData.qpos[-1] = -self.calibration_reference_joint_positions[-1]
+        else:
+            self.mjData.qpos[:] = self.calibration_reference_joint_positions
+        self.mjData.qvel[:] = 0.0
+        mujoco.mj_forward(self.mjModel, self.mjData)
+        self.viewer.sync()
+
+        self.mjData.qpos[:] = saved_qpos
+        self.mjData.qvel[:] = saved_qvel
+        mujoco.mj_forward(self.mjModel, self.mjData)
 
     def _initialize_calibration_trajectory(self):
         """Initialize calibration trajectory with random values"""
@@ -188,7 +232,11 @@ class Data_Collection_Node(Node):
         """Get desired joint positions and control gains based on collection type"""
         
         if self.console.setpoint_collection:
-            print("not implemented")
+            desired_joint_pos = copy.deepcopy(
+                self.calibration_reference_joint_positions
+            )
+            Kp = self.Kp
+            Kd = self.Kd
             
         elif self.console.falling_collection:
             print("not implemented")
@@ -198,8 +246,12 @@ class Data_Collection_Node(Node):
             Kp = self.Kp
             Kd = self.Kd
 
-            time_traj = self.start_collection_time - time.time()
-            desired_joint_pos = self.calibration_reference_trajectory[int((time_traj/self.chirp_traj_time)*100)]
+            elapsed_time = time.time() - self.start_collection_time
+            trajectory_index = min(
+                int((elapsed_time / self.chirp_traj_time) * len(self.calibration_reference_trajectory)),
+                len(self.calibration_reference_trajectory) - 1,
+            )
+            desired_joint_pos = self.calibration_reference_trajectory[trajectory_index]
 
         return desired_joint_pos, Kp, Kd
 
@@ -231,9 +283,18 @@ class Data_Collection_Node(Node):
         """Check if data collection is complete based on collection type"""
         
         if self.console.setpoint_collection:
-            # Complete when target is reached or timeout
-            print("not implemented")
-            return False 
+            target_reached = np.linalg.norm(desired_joint_pos - joints_pos) < SETPOINT_REACH_TOLERANCE
+            reach_timeout = time.time() - self.start_collection_time > SETPOINT_REACH_TIMEOUT
+
+            if self.setpoint_reached_time is None and (target_reached or reach_timeout):
+                self.setpoint_reached_time = time.time()
+                reason = "target reached" if target_reached else "reach timeout"
+                print(f"Setpoint {reason}; recording {SETPOINT_STATIC_DURATION:.1f} s of static data.")
+
+            return (
+                self.setpoint_reached_time is not None
+                and time.time() - self.setpoint_reached_time >= SETPOINT_STATIC_DURATION
+            )
             
         elif self.console.falling_collection:
             # Complete after falling phase timeout
@@ -245,7 +306,7 @@ class Data_Collection_Node(Node):
             # Complete after trajectory duration
             return time.time() - self.start_collection_time > self.chirp_traj_time
 
-    def _save_trajectory_data(self):
+    def _save_trajectory_data(self, dataset_prefix):
         """Save collected trajectory data to file"""
 
         # HACK
@@ -266,6 +327,11 @@ class Data_Collection_Node(Node):
 
         save_dir = "datasets/" + config.robot
         os.makedirs(save_dir, exist_ok=True)
+        dataset_index = 1
+        dataset_path = os.path.join(save_dir, f"{dataset_prefix}_{dataset_index}.pt")
+        while os.path.exists(dataset_path):
+            dataset_index += 1
+            dataset_path = os.path.join(save_dir, f"{dataset_prefix}_{dataset_index}.pt")
 
         torch.save({
             "time": time_data.cpu(),
@@ -276,17 +342,14 @@ class Data_Collection_Node(Node):
             "des_dof_torque": dof_target_commanded_torque_buffer.cpu(),
             "kp": self.Kp,
             "kd": self.Kd,
-        }, "datasets/" + config.robot + f"/traj_{self.num_traj_saved}.pt")
+        }, dataset_path)
+        print(f"Dataset saved to {dataset_path}")
 
-        self.num_traj_saved += 1
         self.saved_actual_joints_position = None
         self.saved_actual_joints_velocity = None
         self.saved_desired_joints_position = None
         self.saved_desired_joints_velocity = None
         self.saved_commanded_joints_torque = None
-
-        input("Press enter to continue.")
-
 
     def compute_control(self):
         # Update the loop time
@@ -324,15 +387,34 @@ class Data_Collection_Node(Node):
         joints_vel = handle_parallel_gripper(joints_vel)
 
         if(not self.console.isActivated):
-            desired_joint_pos = self.home_position
+            desired_joint_pos = self.idle_joint_position
             # Impedence Loop
             Kp = self.Kp
             Kd = self.Kd
             
 
         elif(self.console.isActivated and (self.console.setpoint_collection or self.console.falling_collection)):
-            
-            print("not implemented")
+            if self.console.setpoint_collection:
+                if self.calibration_reference_joint_positions is None:
+                    # Defensive fallback: normal activation prepares and accepts in Console.
+                    self.prepare_calibration_setpoint()
+                    self.accept_calibration_setpoint()
+
+                desired_joint_pos, Kp, Kd = self._get_desired_positions_and_gains()
+                self._collect_trajectory_data(joints_pos, joints_vel, desired_joint_pos)
+
+                if self._check_collection_complete(joints_pos, desired_joint_pos):
+                    self.idle_joint_position = copy.deepcopy(desired_joint_pos)
+                    self._save_trajectory_data("setpoint")
+                    self.reject_calibration_setpoint()
+                    self.console.setpoint_collection = False
+                    self.console.isActivated = False
+                    print("Setpoint collection completed.")
+            else:
+                print("not implemented")
+                desired_joint_pos = self.home_position
+                Kp = self.Kp
+                Kd = self.Kd
 
         elif(self.console.isActivated and self.console.trajectory_collection):
             # Initialize setpoint if needed
@@ -351,11 +433,14 @@ class Data_Collection_Node(Node):
                 self.calibration_reference_trajectory = None
                 self.chirp_traj_time -= 0.2 # Reduce trajectory time for next trajectory
                 if(self.chirp_traj_time < 0.4):
-                    self._save_trajectory_data()
+                    self.idle_joint_position = copy.deepcopy(desired_joint_pos)
+                    self._save_trajectory_data("trajectory")
+                    self.chirp_traj_time = INITIAL_CHIRP_TRAJECTORY_DURATION
                     self.console.trajectory_collection = False
+                    self.console.isActivated = False
                     print("Trajectory collection completed.")
         else:
-            desired_joint_pos = self.home_position
+            desired_joint_pos = self.idle_joint_position
             # Impedence Loop
             Kp = self.Kp*0.0
             Kd = self.Kd*0.0
@@ -387,7 +472,11 @@ class Data_Collection_Node(Node):
             RENDER_FREQ = 30
             # Render only at a certain frequency -----------------------------------------------------------------
             if time.time() - self.last_render_time > 1.0 / RENDER_FREQ:
-                self.viewer.sync()
+                if self.setpoint_preview_active:
+                    self._render_calibration_setpoint_preview()
+                else:
+                    self.viewer.sync()
+                self.last_render_time = time.time()
 
 
 

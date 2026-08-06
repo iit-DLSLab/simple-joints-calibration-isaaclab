@@ -45,8 +45,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         type=Path,
-        default=REPO_ROOT / "datasets" / config.robot / "traj_0.pt",
-        help="Dataset .pt path. Defaults to datasets/<robot>/traj_0.pt.",
+        default=REPO_ROOT / "datasets" / config.robot / "trajectory_1.pt",
+        help="Dataset .pt path. Defaults to datasets/<robot>/trajectory_1.pt.",
     )
     parser.add_argument(
         "--output-dir",

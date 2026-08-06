@@ -37,7 +37,7 @@ if __name__ == '__main__':
     
 
     # Load datasets for calibration
-    datasets_path = dir_path + "/" + config.robot + "/traj_0.pt"
+    datasets_path = dir_path + "/" + config.robot + "/trajectory_1.pt"
     try:
         data = torch.load(datasets_path, map_location="cpu", weights_only=False)
     except TypeError:
