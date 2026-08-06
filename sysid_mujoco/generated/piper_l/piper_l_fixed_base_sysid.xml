@@ -13,16 +13,16 @@
   </default>
 
   <asset>
-    <mesh name="base_link" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/base_link.STL" />
-    <mesh name="link1" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link1.STL" />
-    <mesh name="link2" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link2.STL" />
-    <mesh name="link3" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link3.STL" />
-    <mesh name="link4" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link4.STL" />
-    <mesh name="link5" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link5.STL" />
-    <mesh name="link7" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link7.STL" />
-    <mesh name="link8" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link8.STL" />
-    <mesh name="gripper_base_100_v3" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/gripper_base_100_v3.STL" />
-    <mesh name="realsense_mid_stand_v2" content_type="model/stl" file="/home/gturrisi/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/realsense_mid_stand_v2.STL" />
+    <mesh name="base_link" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/base_link.STL" />
+    <mesh name="link1" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link1.STL" />
+    <mesh name="link2" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link2.STL" />
+    <mesh name="link3" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link3.STL" />
+    <mesh name="link4" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link4.STL" />
+    <mesh name="link5" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link5.STL" />
+    <mesh name="link7" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link7.STL" />
+    <mesh name="link8" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/link8.STL" />
+    <mesh name="gripper_base_100_v3" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/gripper_base_100_v3.STL" />
+    <mesh name="realsense_mid_stand_v2" content_type="model/stl" file="/home/gturrisi-iit.local/other_ws_home/sim2real-robot-identification/robot_model/piper_l/assets/realsense_mid_stand_v2.STL" />
   </asset>
 
   <worldbody>
@@ -67,7 +67,7 @@
                 <geom type="mesh" rgba="1 1 1 1" mesh="link5" class="visual" contype="0" conaffinity="0" />
                 <geom size="0.03 0.025" pos="0 -0.08 0.0" quat="1 1 0 0" type="capsule" class="collision" contype="0" conaffinity="0" />
                 
-                <body name="link6" pos="0 -0.091 0" quat="0.707105 0.707108 0 0">
+                <body name="link6" pos="0 -0.103 0" quat="0.707105 0.707108 0 0">
                   
                   <inertial pos="-0.0418018 0 0.0408739" quat="1 0 0 0" mass="0.7976323" diaginertia="0.000195998 9.16013e-05 0.00024367" />
                   <joint name="joint6" pos="0 0 0" axis="0 0 1" range="-3.14 3.14" armature="0.01" frictionloss="0.020" damping="0.2813" />
@@ -124,6 +124,6 @@
   <jointpos name="joint8_pos" joint="joint8" /></sensor>
 
   <actuator>
-      <general joint="joint1" gear="1" forcerange="-32 32" name="joint1" ctrlrange="-2.618 2.618" /><general joint="joint2" gear="1" forcerange="-32 32" name="joint2" ctrlrange="0 3.14" /><general joint="joint3" gear="1" forcerange="-32 32" name="joint3" ctrlrange="-2.697 0" /><general joint="joint4" gear="1" forcerange="-8 8" name="joint4" ctrlrange="-1.832 1.832" /><general joint="joint5" gear="1" forcerange="-8 8" name="joint5" ctrlrange="-1.22 1.22" /><general joint="joint6" gear="1" forcerange="-8 8" name="joint6" ctrlrange="-3.14 3.14" /><general joint="joint7" gear="1" forcerange="-0.5 0.5" name="gripper" ctrlrange="0 0.05" /></actuator>
+      <general joint="joint1" gear="1" forcerange="-32 32" name="joint1" ctrlrange="-2.618 2.618" biastype="affine" gainprm="150" biasprm="0 -150 -10" /><general joint="joint2" gear="1" forcerange="-32 32" name="joint2" ctrlrange="0 3.14" biastype="affine" gainprm="150" biasprm="0 -150 -10" /><general joint="joint3" gear="1" forcerange="-32 32" name="joint3" ctrlrange="-2.697 0" biastype="affine" gainprm="150" biasprm="0 -150 -10" /><general joint="joint4" gear="1" forcerange="-8 8" name="joint4" ctrlrange="-1.832 1.832" biastype="affine" gainprm="10" biasprm="0 -10 -0.8" /><general joint="joint5" gear="1" forcerange="-8 8" name="joint5" ctrlrange="-1.22 1.22" biastype="affine" gainprm="10" biasprm="0 -10 -0.8" /><general joint="joint6" gear="1" forcerange="-8 8" name="joint6" ctrlrange="-3.14 3.14" biastype="affine" gainprm="10" biasprm="0 -10 -0.8" /><general joint="joint7" gear="1" forcerange="-0.5 0.5" name="gripper" ctrlrange="0 0.05" biastype="affine" gainprm="10" biasprm="0 -10 -0.8" /></actuator>
 
   </mujoco>

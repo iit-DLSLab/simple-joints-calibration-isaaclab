@@ -66,7 +66,7 @@
                 <geom type="mesh" rgba="1 1 1 1" mesh="link5" class="visual"/>
                 <geom size="0.03 0.025" pos="0 -0.08 0.0" quat="1 1 0 0" type="capsule" class="collision"/>
                 
-                <body name="link6" pos="0 -0.103 0" quat="0.707105 0.707108 0 0">
+                <body name="link6" pos="0 -0.091 0" quat="0.707105 0.707108 0 0">
                   <!--inertial pos="-0.0418018 0 0.0408739" quat="1 0 0 0" mass="0.0776323" diaginertia="0.000195998 9.16013e-05 0.00024367"/-->
                   <inertial pos="-0.0418018 0 0.0408739" quat="1 0 0 0" mass="0.7976323" diaginertia="0.000195998 9.16013e-05 0.00024367"/>
                   <joint name="joint6" pos="0 0 0" axis="0 0 1" range="-3.14 3.14" armature="0.01" frictionloss="0.020" damping="0.2813"/>

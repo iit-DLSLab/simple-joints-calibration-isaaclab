@@ -155,7 +155,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(0.5, 1.5),
+        default=(0.5, 5.0),
         help="Mass bounds as multipliers of each link's nominal mass.",
     )
     parser.add_argument(
@@ -163,7 +163,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(-0.01, 0.01),
+        default=(-0.03, 0.03),
         help="Additive bounds in metres around every nominal CoM component.",
     )
     parser.add_argument(
