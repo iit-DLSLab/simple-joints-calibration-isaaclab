@@ -138,6 +138,8 @@ class Data_Collection_Node(Node):
         self.calibration_reference_joint_positions = None
         self.setpoint_reached_time = None
         self.setpoint_preview_active = False
+        self.setpoint_preview_viewer = None
+        self.setpoint_preview_data = None
         
 
         # Chirp Trajectory only variables
@@ -168,6 +170,7 @@ class Data_Collection_Node(Node):
 
     def prepare_calibration_setpoint(self):
         """Generate and display a setpoint without commanding the robot."""
+        self._close_calibration_setpoint_preview()
         lower_bound = np.minimum(self.home_position, self.goal_position)
         upper_bound = np.maximum(self.home_position, self.goal_position)
         self.calibration_reference_joint_positions = np.random.uniform(
@@ -178,18 +181,47 @@ class Data_Collection_Node(Node):
         print(self.calibration_reference_joint_positions)
         if USE_MUJOCO_RENDER:
             print("The proposed pose is shown in the MuJoCo viewer.")
+        else:
+            self._open_calibration_setpoint_preview()
+            print("A temporary MuJoCo viewer is showing the proposed pose.")
 
     def accept_calibration_setpoint(self):
         """Start timing only after the operator has approved the setpoint."""
+        self._close_calibration_setpoint_preview()
         self.start_collection_time = time.time()
         self.setpoint_reached_time = None
         self.setpoint_preview_active = False
 
     def reject_calibration_setpoint(self):
+        self._close_calibration_setpoint_preview()
         self.calibration_reference_joint_positions = None
         self.start_collection_time = None
         self.setpoint_reached_time = None
         self.setpoint_preview_active = False
+
+    def _open_calibration_setpoint_preview(self):
+        """Open a temporary viewer that cannot affect the controlled state."""
+        self.setpoint_preview_data = mujoco.MjData(self.mjModel)
+        if config.robot == "piper_l":
+            self.setpoint_preview_data.qpos[:-1] = self.calibration_reference_joint_positions
+            self.setpoint_preview_data.qpos[-1] = -self.calibration_reference_joint_positions[-1]
+        else:
+            self.setpoint_preview_data.qpos[:] = self.calibration_reference_joint_positions
+        self.setpoint_preview_data.qvel[:] = 0.0
+        mujoco.mj_forward(self.mjModel, self.setpoint_preview_data)
+        self.setpoint_preview_viewer = mujoco.viewer.launch_passive(
+            self.mjModel,
+            self.setpoint_preview_data,
+            show_left_ui=False,
+            show_right_ui=False,
+        )
+        self.setpoint_preview_viewer.sync()
+
+    def _close_calibration_setpoint_preview(self):
+        if self.setpoint_preview_viewer is not None:
+            self.setpoint_preview_viewer.close()
+        self.setpoint_preview_viewer = None
+        self.setpoint_preview_data = None
 
     def _render_calibration_setpoint_preview(self):
         """Render the proposed pose without changing the controller/simulation state."""
