@@ -45,8 +45,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         type=Path,
-        default=REPO_ROOT / "datasets" / config.robot / "traj_0.pt",
-        help="Dataset .pt path. Defaults to datasets/<robot>/traj_0.pt.",
+        default=REPO_ROOT / "datasets" / config.robot / "trajectory_1.pt",
+        help="Dataset .pt path. Defaults to datasets/<robot>/trajectory_1.pt.",
     )
     parser.add_argument(
         "--output-dir",
@@ -201,6 +201,7 @@ def simulate_open_loop(
     data = mujoco.MjData(model)
     times = trajectory.times
     ctrl = trajectory.ctrl
+    model.opt.timestep = 1.0 / config.frequency_collection
 
     if len(times) < 2:
         raise ValueError("The trajectory must contain at least two samples.")

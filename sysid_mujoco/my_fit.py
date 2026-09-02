@@ -39,6 +39,11 @@ def default_converted_paths(robot: str) -> list[Path]:
     return sorted((REPO_ROOT / "sysid_mujoco" / "converted" / robot).glob("*.npz"))
 
 
+def default_dataset_paths(robot: str) -> list[Path]:
+    """Return every dataset for the selected robot as an independent chunk."""
+    return sorted((REPO_ROOT / "datasets" / robot).glob("*.pt"))
+
+
 def default_output_dir(robot: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return REPO_ROOT / "sysid_mujoco" / "results" / robot / timestamp
@@ -60,8 +65,11 @@ def parse_args() -> argparse.Namespace:
         "--dataset",
         nargs="+",
         type=Path,
-        default=[Path(str(REPO_ROOT) + "/datasets/" + config.robot + "/traj_0.pt")],
-        help="Raw repository datasets (.pt). If provided, conversion is done in-memory.",
+        default=None,
+        help=(
+            "Optional raw repository datasets (.pt). By default, every .pt file "
+            "inside datasets/<robot> is loaded as an independent chunk."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -147,7 +155,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(0.5, 1.5),
+        default=(0.5, 5.0),
         help="Mass bounds as multipliers of each link's nominal mass.",
     )
     parser.add_argument(
@@ -155,7 +163,7 @@ def parse_args() -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("LOWER", "UPPER"),
-        default=(-0.01, 0.01),
+        default=(-0.03, 0.03),
         help="Additive bounds in metres around every nominal CoM component.",
     )
     parser.add_argument(
@@ -384,8 +392,15 @@ def display_report(report, report_path: Path) -> Path:
 
 def main() -> None:
     args = parse_args()
+    if args.dataset is None:
+        args.dataset = default_dataset_paths(args.robot)
     if not args.dataset:
-        raise ValueError("Use --dataset to pass a dataset")
+        dataset_dir = REPO_ROOT / "datasets" / args.robot
+        raise FileNotFoundError(f"No .pt datasets found in {dataset_dir}")
+
+    print(f"Loading {len(args.dataset)} dataset chunk(s) for {args.robot}:")
+    for dataset_path in args.dataset:
+        print(f"  - {dataset_path}")
     if args.inertial_bodies is not None and not any(
         (
             args.identify_link_mass,
@@ -406,6 +421,7 @@ def main() -> None:
         build_fixed_base_model_xml(args.robot),
     )
     fixed_base_spec = mujoco.MjSpec.from_file(str(fixed_base_xml))
+    fixed_base_spec.option.timestep = 1.0 / config.frequency_collection
     fixed_base_model = fixed_base_spec.compile()
     actuated_joint_names, _ = get_actuated_joint_and_actuator_names(mujoco, fixed_base_model)
     actuator_kp, actuator_kd = _scale_actuator_gains_for_fit(
@@ -426,6 +442,7 @@ def main() -> None:
         ),
     )
     fixed_base_spec = mujoco.MjSpec.from_file(str(fixed_base_xml))
+    fixed_base_spec.option.timestep = 1.0 / config.frequency_collection
     fixed_base_model = fixed_base_spec.compile()
 
     measurement_ts, control_ts, initial_states = build_model_sequences_from_source(

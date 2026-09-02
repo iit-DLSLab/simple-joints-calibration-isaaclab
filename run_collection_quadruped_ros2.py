@@ -37,7 +37,7 @@ if os.environ.get("BASIC_LOCOMOTION_ROS2_SOURCED") != "1":
 
 import rclpy 
 from rclpy.node import Node 
-from dls2_interface.msg import BaseState, BlindState, Imu, TrajectoryGenerator
+from dls2_interface.msg import BlindState, ControlSignal
 
 import time
 import numpy as np
@@ -65,14 +65,19 @@ USE_MUJOCO_SIMULATION = False
 
 
 CONTROL_FREQ = config.frequency_collection # Hz 
+SETPOINT_REACH_TOLERANCE = 0.1
+SETPOINT_REACH_TIMEOUT = 2.0
+SETPOINT_STATIC_DURATION = 0.5
+INITIAL_CHIRP_TRAJECTORY_DURATION = 3.0
 
 
 class Data_Collection_Node(Node):
     def __init__(self):
         super().__init__('Data_Collection_Node')
         # Subscribers and Publishers
-        self.subscription_blind_state = self.create_subscription(BlindState,"/blind_state", self.get_blind_state_callback, 1)
-        self.publisher_trajectory_generator = self.create_publisher(TrajectoryGenerator,"/trajectory_generator", 1)
+        self.subscription_blind_state = self.create_subscription(BlindState,"/blind_state_legged", self.get_blind_state_callback, 1)
+        self.publisher_control_signal = self.create_publisher(ControlSignal,"/control_signal_legged", 1)
+        self.sequence_id = 0 # To keep track of the last msg sent, useful for debugging and synchronization
         self.timer = self.create_timer(1.0/CONTROL_FREQ, self.compute_control)
 
 
@@ -99,6 +104,8 @@ class Data_Collection_Node(Node):
         # Create the environment -----------------------------------------------------------
         self.mjModel = mujoco.MjModel.from_xml_path(str(dir_path) + "/robot_model/" + config.robot + "/scene_flat.xml")
         self.mjData = mujoco.MjData(self.mjModel)
+        if USE_MUJOCO_SIMULATION:
+            self.mjModel.opt.timestep = 1.0 / CONTROL_FREQ
 
         if(USE_MUJOCO_RENDER):
             self.viewer = mujoco.viewer.launch_passive(
@@ -116,15 +123,18 @@ class Data_Collection_Node(Node):
         keyframe_sys_id_2 = mujoco.mj_name2id(self.mjModel, mujoco.mjtObj.mjOBJ_KEY, "sys_id_2")
         
         self.stand_up_and_down_actions = self.mjModel.key_qpos[keyframe_sys_id_1][7:]
+        self.idle_joint_positions = self.stand_up_and_down_actions.reshape(4, 3).copy()
         
         self.Kp = config.Kp
         self.Kd = config.Kd
 
         self.calibration_reference_joint_positions = None
+        self.setpoint_reached_time = None
+        self.setpoint_preview_active = False
         
 
         # Chirp Trajectory only variables
-        self.chirp_traj_time = 3.0
+        self.chirp_traj_time = INITIAL_CHIRP_TRAJECTORY_DURATION
         self.calibration_reference_calf_trajectory = None
         self.calibration_reference_thigh_trajectory = None
         self.calibration_reference_hip_trajectory = None
@@ -142,9 +152,6 @@ class Data_Collection_Node(Node):
         self.saved_actual_joints_velocity = None
         self.saved_desired_joints_position = None
         self.saved_desired_joints_velocity = None
-        self.num_traj_saved = 0
-
-
         # Interactive Command Line ----------------------------
         from console import Console
         self.console = Console(controller_node=self)
@@ -161,9 +168,8 @@ class Data_Collection_Node(Node):
         self.first_message_joints_arrived = True
 
         
-    def _initialize_calibration_setpoint(self):
+    def prepare_calibration_setpoint(self):
         """Initialize calibration setpoint with random values"""
-        print("Generating first a setpoint..")
         hip_setpoint = np.random.uniform(-0.0, 0.5)
         thigh_setpoint = np.random.uniform(-1.0, 0.5)
         calf_setpoint = np.random.uniform(-0., 1.5)
@@ -172,7 +178,41 @@ class Data_Collection_Node(Node):
         self.calibration_reference_joint_positions[1] = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
         self.calibration_reference_joint_positions[2] = np.array([0.0+hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
         self.calibration_reference_joint_positions[3] = np.array([0.0-hip_setpoint, 1.21+thigh_setpoint, -2.794+calf_setpoint])
+        self.setpoint_preview_active = True
+        print("\nProposed setpoint (rows: FL, FR, RL, RR; columns: hip, thigh, calf):")
+        print(self.calibration_reference_joint_positions)
+        if USE_MUJOCO_RENDER:
+            print("The proposed pose is shown in the MuJoCo viewer.")
+
+    def accept_calibration_setpoint(self):
         self.start_collection_time = time.time()
+        self.setpoint_reached_time = None
+        self.setpoint_preview_active = False
+
+    def reject_calibration_setpoint(self):
+        self.calibration_reference_joint_positions = None
+        self.start_collection_time = None
+        self.setpoint_reached_time = None
+        self.setpoint_preview_active = False
+
+    def _render_calibration_setpoint_preview(self):
+        """Render the proposed pose without changing the controller/simulation state."""
+        saved_qpos = self.mjData.qpos.copy()
+        saved_qvel = self.mjData.qvel.copy()
+
+        self.mjData.qpos[7:] = self.calibration_reference_joint_positions.flatten()
+        self.mjData.qvel[:] = 0.0
+        mujoco.mj_forward(self.mjModel, self.mjData)
+        self.viewer.sync()
+
+        self.mjData.qpos[:] = saved_qpos
+        self.mjData.qvel[:] = saved_qvel
+        mujoco.mj_forward(self.mjModel, self.mjData)
+
+    def _initialize_calibration_setpoint(self):
+        """Prepare and immediately accept a setpoint as a defensive fallback."""
+        self.prepare_calibration_setpoint()
+        self.accept_calibration_setpoint()
 
     def _initialize_calibration_trajectory(self):
         """Initialize calibration trajectory with random values"""
@@ -246,11 +286,15 @@ class Data_Collection_Node(Node):
             Kp = self.Kp
             Kd = self.Kd
 
-            time_traj = self.start_collection_time - time.time()
+            time_traj = time.time() - self.start_collection_time
+            trajectory_index = min(
+                int((time_traj / self.chirp_traj_time) * len(self.calibration_reference_hip_trajectory)),
+                len(self.calibration_reference_hip_trajectory) - 1,
+            )
             desired_joint_pos = np.zeros((4, 3))
-            desired_joint_pos[0, 0] = self.calibration_reference_hip_trajectory[int((time_traj/self.chirp_traj_time)*100)]
-            desired_joint_pos[0, 1] = self.calibration_reference_thigh_trajectory[int((time_traj/self.chirp_traj_time)*100)]
-            desired_joint_pos[0, 2] = self.calibration_reference_calf_trajectory[int((time_traj/self.chirp_traj_time)*100)]
+            desired_joint_pos[0, 0] = self.calibration_reference_hip_trajectory[trajectory_index]
+            desired_joint_pos[0, 1] = self.calibration_reference_thigh_trajectory[trajectory_index]
+            desired_joint_pos[0, 2] = self.calibration_reference_calf_trajectory[trajectory_index]
             desired_joint_pos[1] = copy.deepcopy(desired_joint_pos[0])
             desired_joint_pos[1, 0] = -desired_joint_pos[1, 0]
             desired_joint_pos[2] = copy.deepcopy(desired_joint_pos[0])
@@ -284,12 +328,22 @@ class Data_Collection_Node(Node):
         """Check if data collection is complete based on collection type"""
         if self.console.setpoint_collection:
             # Complete when target is reached or timeout
-            target_reached = (np.linalg.norm(desired_joint_pos[0] - joints_pos[0]) < 0.1 and
-                            np.linalg.norm(desired_joint_pos[1] - joints_pos[1]) < 0.1 and
-                            np.linalg.norm(desired_joint_pos[2] - joints_pos[2]) < 0.1 and
-                            np.linalg.norm(desired_joint_pos[3] - joints_pos[3]) < 0.1)
-            timeout = time.time() - self.start_collection_time > 2.0
-            return target_reached or timeout
+            target_reached = (
+                np.linalg.norm(desired_joint_pos[0] - joints_pos[0]) < SETPOINT_REACH_TOLERANCE
+                and np.linalg.norm(desired_joint_pos[1] - joints_pos[1]) < SETPOINT_REACH_TOLERANCE
+                and np.linalg.norm(desired_joint_pos[2] - joints_pos[2]) < SETPOINT_REACH_TOLERANCE
+                and np.linalg.norm(desired_joint_pos[3] - joints_pos[3]) < SETPOINT_REACH_TOLERANCE
+            )
+            reach_timeout = time.time() - self.start_collection_time > SETPOINT_REACH_TIMEOUT
+            if self.setpoint_reached_time is None and (target_reached or reach_timeout):
+                self.setpoint_reached_time = time.time()
+                reason = "target reached" if target_reached else "reach timeout"
+                print(f"Setpoint {reason}; recording {SETPOINT_STATIC_DURATION:.1f} s of static data.")
+
+            return (
+                self.setpoint_reached_time is not None
+                and time.time() - self.setpoint_reached_time >= SETPOINT_STATIC_DURATION
+            )
             
         elif self.console.falling_collection:
             # Complete after falling phase timeout
@@ -299,13 +353,12 @@ class Data_Collection_Node(Node):
             # Complete after trajectory duration
             return time.time() - self.start_collection_time > self.chirp_traj_time
 
-    def _save_trajectory_data(self):
+    def _save_trajectory_data(self, dataset_prefix):
         """Save collected trajectory data to file"""
 
         # HACK
         num_steps = self.saved_actual_joints_position.shape[0]
-        duration = num_steps/CONTROL_FREQ
-        time_data = torch.linspace(0, duration, steps=num_steps, device="cpu")
+        time_data = torch.arange(num_steps, device="cpu") / CONTROL_FREQ
         dof_pos_buffer = torch.zeros(num_steps, 12, device="cpu")
         dof_vel_buffer = torch.zeros(num_steps, 12, device="cpu")
         dof_target_pos_buffer = torch.zeros(num_steps, 12, device="cpu")
@@ -320,6 +373,11 @@ class Data_Collection_Node(Node):
 
         save_dir = "datasets/" + config.robot
         os.makedirs(save_dir, exist_ok=True)
+        dataset_index = 1
+        dataset_path = os.path.join(save_dir, f"{dataset_prefix}_{dataset_index}.pt")
+        while os.path.exists(dataset_path):
+            dataset_index += 1
+            dataset_path = os.path.join(save_dir, f"{dataset_prefix}_{dataset_index}.pt")
 
         torch.save({
             "time": time_data.cpu(),
@@ -329,16 +387,13 @@ class Data_Collection_Node(Node):
             "des_dof_vel": dof_target_vel_buffer.cpu(),
             "kp": self.Kp,
             "kd": self.Kd,
-        }, "datasets/" + config.robot + f"/traj_{self.num_traj_saved}.pt")
+        }, dataset_path)
+        print(f"Dataset saved to {dataset_path}")
 
-        self.num_traj_saved += 1
         self.saved_actual_joints_position = None
         self.saved_actual_joints_velocity = None
         self.saved_desired_joints_position = None
         self.saved_desired_joints_velocity = None
-
-        input("Press enter to continue.")
-
 
     def compute_control(self):
         # Update the loop time
@@ -386,11 +441,7 @@ class Data_Collection_Node(Node):
         joints_vel[3] = qvel[15:18]
     
         if(not self.console.isActivated):
-            desired_joint_pos = np.zeros((4, 3))
-            desired_joint_pos[0] = self.stand_up_and_down_actions[0:3]
-            desired_joint_pos[1] = self.stand_up_and_down_actions[3:6]
-            desired_joint_pos[2] = self.stand_up_and_down_actions[6:9]
-            desired_joint_pos[3] = self.stand_up_and_down_actions[9:12]
+            desired_joint_pos = copy.deepcopy(self.idle_joint_positions)
 
             # Impedence Loop
             Kp = self.Kp
@@ -412,8 +463,15 @@ class Data_Collection_Node(Node):
             # Check if collection is complete
             collection_complete = self._check_collection_complete(joints_pos, desired_joint_pos)
             if collection_complete:
-                self.calibration_reference_joint_positions = None
-                self._save_trajectory_data()
+                dataset_prefix = "setpoint" if self.console.setpoint_collection else "falling"
+                if self.console.setpoint_collection:
+                    self.idle_joint_positions = copy.deepcopy(desired_joint_pos)
+                self._save_trajectory_data(dataset_prefix)
+                self.reject_calibration_setpoint()
+                if self.console.setpoint_collection:
+                    self.console.setpoint_collection = False
+                    self.console.isActivated = False
+                    print("Setpoint collection completed.")
 
         elif(self.console.isActivated and self.console.trajectory_collection):
             # Initialize setpoint if needed
@@ -434,15 +492,12 @@ class Data_Collection_Node(Node):
                 self.calibration_reference_calf_trajectory = None
                 self.chirp_traj_time -= 0.2 # Reduce trajectory time for next trajectory
                 if(self.chirp_traj_time < 0.4):
-                    self._save_trajectory_data()
+                    self._save_trajectory_data("trajectory")
+                    self.chirp_traj_time = INITIAL_CHIRP_TRAJECTORY_DURATION
                     self.console.trajectory_collection = False
                     print("Trajectory collection completed.")
         else:
-            desired_joint_pos = np.zeros((4, 3))
-            desired_joint_pos[0] = self.stand_up_and_down_actions[0:3]
-            desired_joint_pos[1] = self.stand_up_and_down_actions[3:6]
-            desired_joint_pos[2] = self.stand_up_and_down_actions[6:9]
-            desired_joint_pos[3] = self.stand_up_and_down_actions[9:12]
+            desired_joint_pos = copy.deepcopy(self.idle_joint_positions)
 
             # Impedence Loop
             Kp = self.Kp*0.0
@@ -480,14 +535,17 @@ class Data_Collection_Node(Node):
                 mujoco.mj_step(self.mjModel, self.mjData)
 
 
-        # Publish the desired joint positions to the trajectory generator --------------------------------
-        trajectory_generator_msg = TrajectoryGenerator()
-        trajectory_generator_msg.timestamp = float(self.get_clock().now().nanoseconds)
-        trajectory_generator_msg.joints_position = np.array([desired_joint_pos[0], desired_joint_pos[1], desired_joint_pos[2], desired_joint_pos[3]]).flatten().tolist()
-        trajectory_generator_msg.joints_velocity = np.zeros(12).tolist()
-        trajectory_generator_msg.kp = Kp.tolist()
-        trajectory_generator_msg.kd = Kd.tolist()
-        self.publisher_trajectory_generator.publish(trajectory_generator_msg)
+        # Publish the desired joint positions to the control signal --------------------------------
+        control_signal_msg = ControlSignal()
+        control_signal_msg.timestamp = float(self.get_clock().now().nanoseconds)
+        control_signal_msg.sequence_id = int(self.sequence_id % 1000)  # To avoid overflow, we reset the sequence id after it reaches a certain value
+        self.sequence_id += 1
+        control_signal_msg.joints_position = np.array([desired_joint_pos[0], desired_joint_pos[1], desired_joint_pos[2], desired_joint_pos[3]]).flatten().tolist()
+        control_signal_msg.joints_velocity = np.zeros(12).tolist()
+        control_signal_msg.joints_torques = np.zeros(12).tolist()
+        control_signal_msg.kp = Kp.tolist()
+        control_signal_msg.kd = Kd.tolist()
+        self.publisher_control_signal.publish(control_signal_msg)
         
         
         
@@ -496,7 +554,11 @@ class Data_Collection_Node(Node):
             RENDER_FREQ = 30
             # Render only at a certain frequency -----------------------------------------------------------------
             if time.time() - self.last_render_time > 1.0 / RENDER_FREQ:
-                self.viewer.sync()
+                if self.setpoint_preview_active:
+                    self._render_calibration_setpoint_preview()
+                else:
+                    self.viewer.sync()
+                self.last_render_time = time.time()
 
 
 

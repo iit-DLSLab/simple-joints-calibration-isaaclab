@@ -17,7 +17,6 @@
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
-# ROS1
-ros1_ws/build/
-ros1_ws/devel/
-ros1_ws/install/
+
+sysid_mujoco/generated/
+sysid_mujoco/results/

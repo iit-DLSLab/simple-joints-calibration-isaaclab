@@ -44,9 +44,21 @@ class Console():
 
                     mode = input("Select the collection mode (setpoint/falling/trajectory): ")
                     if(mode == "setpoint"):
+                        self.controller_node.prepare_calibration_setpoint()
+                        confirmation = input("Execute this setpoint? [y/N]: ").strip().lower()
+                        if confirmation not in ("y", "yes"):
+                            self.controller_node.reject_calibration_setpoint()
+                            self.setpoint_collection = False
+                            self.falling_collection = False
+                            self.trajectory_collection = False
+                            print("Setpoint rejected. No motion will be executed.")
+                            self.isActivated = False
+                            continue
+
                         self.setpoint_collection = True
                         self.falling_collection = False
                         self.trajectory_collection = False
+                        self.controller_node.accept_calibration_setpoint()
                         print("Setpoint collection mode activated")
                     elif(mode == "falling"):
                         self.setpoint_collection = False

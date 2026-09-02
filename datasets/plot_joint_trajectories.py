@@ -19,7 +19,7 @@ import config  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
-    default_dataset = DATASETS_DIR / config.robot / "traj_0.pt"
+    default_dataset = DATASETS_DIR / config.robot / "trajectory_1.pt"
 
     parser = argparse.ArgumentParser(
         description="Plot desired and real position trajectories in one subplot per joint."
