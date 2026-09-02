@@ -36,7 +36,7 @@ if os.environ.get("SIM2REAL_ROBOT_IDENTIFICATION_SOURCED") != "1":
 
 import rclpy 
 from rclpy.node import Node 
-from dls2_interface.msg import ArmState, ArmTrajectoryGenerator
+from dls2_interface.msg import BlindState, ControlSignal
 
 import time
 import numpy as np
@@ -79,8 +79,9 @@ class Data_Collection_Node(Node):
     def __init__(self):
         super().__init__('Data_Collection_Node')
         # Subscribers and Publishers
-        self.subscription_arm_state = self.create_subscription(ArmState,"/arm_state", self.get_arm_blind_state_callback, 1)
-        self.publisher_arm_trajectory_generator = self.create_publisher(ArmTrajectoryGenerator,"/arm_trajectory_generator", 1)
+        self.subscription_blind_state = self.create_subscription(BlindState,"/blind_state_arm", self.get_blind_state_callback, 1)
+        self.publisher_control_signal = self.create_publisher(ControlSignal,"/control_signal_arm", 1)
+        self.sequence_id = 0 # To keep track of the last msg sent, useful for debugging and synchronization
         self.timer = self.create_timer(1.0/CONTROL_FREQ, self.compute_control)
 
 
@@ -159,12 +160,9 @@ class Data_Collection_Node(Node):
         thread_console.start()
 
 
-    def get_arm_blind_state_callback(self, msg):        
+    def get_blind_state_callback(self, msg):
         self.arm_joints_position = np.array(msg.joints_position)
-        self.arm_joints_position = np.append(self.arm_joints_position, msg.gripper_position)
-
         self.arm_joints_velocity = np.array(msg.joints_velocity)
-        self.arm_joints_velocity = np.append(self.arm_joints_velocity, msg.gripper_velocity)
 
         self.first_message_joints_arrived = True
 
@@ -485,18 +483,17 @@ class Data_Collection_Node(Node):
             mujoco.mj_step(self.mjModel, self.mjData)
 
 
-        # Publish the desired joint positions to the trajectory generator --------------------------------
-        arm_trajectory_generator_msg = ArmTrajectoryGenerator()
-        arm_trajectory_generator_msg.timestamp = float(self.get_clock().now().nanoseconds)
-        arm_trajectory_generator_msg.desired_arm_joints_position = desired_joint_pos[0:-1].flatten().tolist()
-        arm_trajectory_generator_msg.desired_arm_joints_velocity = np.zeros(6).tolist()
-        arm_trajectory_generator_msg.desired_arm_gripper_position = desired_joint_pos[-1]
-        arm_trajectory_generator_msg.desired_arm_gripper_velocity = 0.0
-        arm_trajectory_generator_msg.arm_kp = Kp[0:6].tolist()
-        arm_trajectory_generator_msg.arm_kd = Kd[0:6].tolist()
-        arm_trajectory_generator_msg.gripper_kp = Kp[6].tolist()
-        arm_trajectory_generator_msg.gripper_kd = Kd[6].tolist()
-        self.publisher_arm_trajectory_generator.publish(arm_trajectory_generator_msg)
+        # Publish the desired joint positions to the control signal --------------------------------
+        control_signal_msg = ControlSignal()
+        control_signal_msg.timestamp = float(self.get_clock().now().nanoseconds)
+        control_signal_msg.sequence_id = int(self.sequence_id % 1000)  # To avoid overflow, we reset the sequence id after it reaches a certain value
+        self.sequence_id += 1
+        control_signal_msg.joints_position = np.array(desired_joint_pos).flatten().tolist()
+        control_signal_msg.joints_velocity = np.zeros(len(desired_joint_pos)).tolist()
+        control_signal_msg.joints_torques = np.zeros(len(desired_joint_pos)).tolist()
+        control_signal_msg.kp = np.array(Kp).flatten().tolist()
+        control_signal_msg.kd = np.array(Kd).flatten().tolist()
+        self.publisher_control_signal.publish(control_signal_msg)
         
         
         
